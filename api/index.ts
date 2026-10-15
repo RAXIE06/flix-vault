@@ -2,9 +2,9 @@
 import express from 'express';
 import cookieParser from 'cookie-parser';
 import dotenv from 'dotenv';
-import { initDatabase } from '../server/db';
-import { publicRouter } from '../server/routes/public';
-import { adminRouter } from '../server/routes/admin';
+import { initDatabase } from '../server/db.js';
+import { publicRouter } from '../server/routes/public.js';
+import { adminRouter } from '../server/routes/admin.js';
 
 dotenv.config();
 
