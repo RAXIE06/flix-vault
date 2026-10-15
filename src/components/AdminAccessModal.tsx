@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import { createPortal } from 'react-dom';
 import { X, Lock, Eye, EyeOff, ShieldAlert, ArrowRight, Loader2 } from 'lucide-react';
 import { api } from '../services/api';
 
@@ -48,7 +49,6 @@ export const AdminAccessModal: React.FC<AdminAccessModalProps> = ({
 
     try {
       setLoading(true);
-      // Real server-side authentication call
       await api.loginAdmin(accessCode.trim());
       setLoading(false);
       onAuthenticated();
@@ -58,9 +58,11 @@ export const AdminAccessModal: React.FC<AdminAccessModalProps> = ({
     }
   };
 
-  return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/85 backdrop-blur-md animate-in fade-in duration-200">
-      
+  const modalContent = (
+    <div
+      className="fixed inset-0 flex items-center justify-center p-4 bg-black/85 backdrop-blur-md animate-in fade-in duration-200"
+      style={{ zIndex: 99999 }}
+    >
       <div
         className="relative w-full max-w-md bg-[#0d0917] border border-purple-950/90 rounded-2xl p-6 sm:p-8 shadow-2xl shadow-purple-950/80 my-auto text-left"
         role="dialog"
@@ -104,7 +106,7 @@ export const AdminAccessModal: React.FC<AdminAccessModalProps> = ({
             <label htmlFor="admin-access-code" className="block text-xs font-semibold text-zinc-300 mb-1.5">
               Admin Access Code
             </label>
-            
+
             <div className="relative">
               <input
                 id="admin-access-code"
@@ -169,7 +171,8 @@ export const AdminAccessModal: React.FC<AdminAccessModalProps> = ({
         </form>
 
       </div>
-
     </div>
   );
+
+  return createPortal(modalContent, document.body);
 };
