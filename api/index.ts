@@ -127,6 +127,8 @@ const OrderSchema = new mongoose.Schema({
   upiVpa: String,
   payeeName: String,
   qrString: String,
+  upiPaymentUri: String,
+  upiPayeeName: String,
 }, { timestamps: true, strict: false });
 
 const OrderModel = mongoose.models.Order || mongoose.model('Order', OrderSchema);
@@ -251,7 +253,6 @@ app.post('/api/orders/create', async (req, res) => {
     // Try DB first, fallback to any movie with this id
     let movie = await MovieModel.findOne({ id: movieId }).lean();
     if (!movie) {
-      // Check for enabled movies if exact match fails
       const anyMovie = await MovieModel.findOne({}).lean();
       if (!anyMovie) {
         return res.status(404).json({ error: 'Movie not found in database' });
@@ -286,6 +287,8 @@ app.post('/api/orders/create', async (req, res) => {
       upiVpa,
       payeeName,
       qrString: upiString,
+      upiPaymentUri: upiString,
+      upiPayeeName: payeeName,
     });
     await order.save();
 
@@ -307,7 +310,12 @@ app.get('/api/orders/:orderId', async (req, res) => {
       await order.save();
     }
 
-    res.json(order);
+    // Normalize field names for frontend compatibility
+    const orderObj: any = order.toObject();
+    orderObj.upiPaymentUri = orderObj.upiPaymentUri || orderObj.qrString;
+    orderObj.upiPayeeName = orderObj.upiPayeeName || orderObj.payeeName;
+
+    res.json(orderObj);
   } catch (err: any) {
     res.status(500).json({ error: 'Failed to load order' });
   }
@@ -364,7 +372,6 @@ app.post('/api/admin/movies', requireAdmin, async (req, res) => {
 
     const id = data.id || `mv-${Date.now().toString().slice(-6)}`;
 
-    // Upsert — create or update existing
     const movie = await MovieModel.findOneAndUpdate(
       { id },
       { ...data, id },
@@ -595,12 +602,14 @@ app.get('/api/admin/orders', requireAdmin, async (_req, res) => {
     await connectDB();
     const orders = await OrderModel.find({}).sort({ createdAt: -1 }).limit(50).lean();
 
-    // Auto-expire pending orders
     const now = new Date();
     const sanitized = orders.map((o: any) => {
       if (o.status === 'pending' && o.expiresAt && new Date(o.expiresAt) < now) {
         o.status = 'expired';
       }
+      // Normalize field names for frontend
+      o.upiPaymentUri = o.upiPaymentUri || o.qrString;
+      o.upiPayeeName = o.upiPayeeName || o.payeeName;
       return o;
     });
 
@@ -623,6 +632,71 @@ app.post('/api/admin/orders/verify-payments', requireAdmin, async (_req, res) =>
 });
 
 // ============================================================
+// UPI CONFIG
+// ============================================================
+app.get('/api/admin/upi-config', requireAdmin, async (_req, res) => {
+  try {
+    await connectDB();
+    const settings = await SettingsModel.findOne({ key: 'global' }).lean();
+    const upiConfig = settings?.upiConfig || {
+      upiVpa: process.env.UPI_VPA || 'flixvault@upi',
+      payeeName: 'FlixVault Cinema',
+      paiseMinRange: 1,
+      paiseMaxRange: 99,
+    };
+    res.json({ upiConfig });
+  } catch (err: any) {
+    res.status(500).json({ error: 'Failed to load UPI config' });
+  }
+});
+
+app.put('/api/admin/upi-config', requireAdmin, async (req, res) => {
+  try {
+    await connectDB();
+    const { upiVpa, payeeName } = req.body || {};
+    if (!upiVpa || !upiVpa.includes('@')) {
+      return res.status(400).json({ error: 'Valid UPI VPA required (must contain @)' });
+    }
+
+    const upiConfig = {
+      upiVpa: String(upiVpa).trim(),
+      payeeName: String(payeeName || 'FlixVault Cinema').trim(),
+      paiseMinRange: 1,
+      paiseMaxRange: 99,
+    };
+
+    const settings = await SettingsModel.findOneAndUpdate(
+      { key: 'global' },
+      { upiConfig, key: 'global' },
+      { upsert: true, new: true }
+    );
+
+    res.json({ success: true, upiConfig: settings.upiConfig });
+  } catch (err: any) {
+    res.status(500).json({ error: 'Failed to save UPI config' });
+  }
+});
+
+// ============================================================
+// GMAIL STUBS
+// ============================================================
+app.get('/api/admin/gmail/status', requireAdmin, (_req, res) => {
+  res.json({
+    configured: false,
+    verifiedSender: process.env.GMAIL_VERIFIED_SENDER || null,
+    message: 'Gmail IMAP integration not configured in this deployment.',
+  });
+});
+
+app.post('/api/admin/gmail/test-connection', requireAdmin, (_req, res) => {
+  res.json({
+    success: false,
+    message: 'Gmail IMAP not available in this deployment.',
+    durationMs: 0,
+  });
+});
+
+// ============================================================
 // DB STATUS
 // ============================================================
 app.get('/api/admin/db/status', requireAdmin, (_req, res) => {
@@ -633,6 +707,27 @@ app.get('/api/admin/db/status', requireAdmin, (_req, res) => {
       name: mongoose.connection.name,
     },
   });
+});
+
+app.post('/api/admin/db/retry', requireAdmin, async (_req, res) => {
+  try {
+    cached.conn = null;
+    cached.promise = null;
+    await connectDB();
+    res.json({
+      success: true,
+      dbStatus: {
+        connected: mongoose.connection.readyState === 1,
+        name: mongoose.connection.name,
+      },
+    });
+  } catch (err: any) {
+    res.json({
+      success: false,
+      error: err.message,
+      dbStatus: { connected: false },
+    });
+  }
 });
 
 // ============================================================
