@@ -19,7 +19,7 @@ import { api } from '../../services/api';
 
 interface MovieEditModalProps {
   isOpen: boolean;
-  movie: Movie | null; // null = Add Mode, Movie = Edit Mode
+  movie: Movie | null;
   onSave: (movie: Movie) => void;
   onClose: () => void;
 }
@@ -33,7 +33,6 @@ export const MovieEditModal: React.FC<MovieEditModalProps> = ({
   const isEditing = !!movie;
   const fileInputRef = useRef<HTMLInputElement>(null);
 
-  // Form State
   const [title, setTitle] = useState('');
   const [tagline, setTagline] = useState('');
   const [synopsis, setSynopsis] = useState('');
@@ -51,7 +50,6 @@ export const MovieEditModal: React.FC<MovieEditModalProps> = ({
   const [isFeatured, setIsFeatured] = useState(false);
   const [isEnabled, setIsEnabled] = useState(true);
 
-  // Poster Upload & MongoDB Storage State
   const [customPosterUrl, setCustomPosterUrl] = useState('');
   const [posterStorageId, setPosterStorageId] = useState('');
   const [selectedPosterFile, setSelectedPosterFile] = useState<File | null>(null);
@@ -61,7 +59,6 @@ export const MovieEditModal: React.FC<MovieEditModalProps> = ({
   const [posterError, setPosterError] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
-  // Initialize or reset form when movie changes
   useEffect(() => {
     if (movie) {
       setTitle(movie.title);
@@ -81,7 +78,6 @@ export const MovieEditModal: React.FC<MovieEditModalProps> = ({
       setIsFeatured(!!movie.isFeatured);
       setIsEnabled(movie.isEnabled !== false);
 
-      // Existing poster state
       setCustomPosterUrl(movie.customPosterUrl || '');
       setPosterStorageId(movie.posterStorageId || '');
       setPosterPreviewUrl(movie.customPosterUrl || '');
@@ -95,7 +91,6 @@ export const MovieEditModal: React.FC<MovieEditModalProps> = ({
         setPosterFileDetails(null);
       }
     } else {
-      // Defaults for new movie
       setTitle('');
       setTagline('');
       setSynopsis('');
@@ -113,7 +108,6 @@ export const MovieEditModal: React.FC<MovieEditModalProps> = ({
       setIsFeatured(false);
       setIsEnabled(true);
 
-      // Poster state reset
       setCustomPosterUrl('');
       setPosterStorageId('');
       setPosterPreviewUrl('');
@@ -140,14 +134,10 @@ export const MovieEditModal: React.FC<MovieEditModalProps> = ({
     }
   };
 
-  /**
-   * Device Image File Selection & Client Validation
-   */
   const handlePosterFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
 
-    // Validate size: 5MB max
     if (file.size > 5 * 1024 * 1024) {
       setPosterError(
         `File is too large (${(file.size / (1024 * 1024)).toFixed(2)} MB). Maximum allowed size is 5MB.`
@@ -156,7 +146,6 @@ export const MovieEditModal: React.FC<MovieEditModalProps> = ({
       return;
     }
 
-    // Validate format: JPEG, PNG, WEBP, GIF, SVG
     const allowed = ['image/jpeg', 'image/jpg', 'image/png', 'image/webp', 'image/gif', 'image/svg+xml'];
     if (!allowed.includes(file.type.toLowerCase())) {
       setPosterError('Invalid file type. Please upload a JPG, PNG, WEBP, GIF, or SVG image.');
@@ -189,7 +178,6 @@ export const MovieEditModal: React.FC<MovieEditModalProps> = ({
     setPosterError(null);
     if (fileInputRef.current) fileInputRef.current.value = '';
 
-    // If editing a movie with a saved poster in GridFS, call removal endpoint
     if (movie?.id && (movie.posterStorageId || movie.customPosterUrl?.startsWith('/api/'))) {
       try {
         await api.removeMoviePoster(movie.id);
@@ -219,26 +207,36 @@ export const MovieEditModal: React.FC<MovieEditModalProps> = ({
     let finalPosterContentType = movie?.posterContentType;
     let finalPosterSize = movie?.posterSize;
 
-    // If a new poster was selected from the device, upload directly to MongoDB GridFS!
+    // Poster upload handling
     if (selectedPosterFile) {
-      try {
-        setIsUploadingPoster(true);
-        setPosterError(null);
+      if (movie) {
+        // EDIT MODE: Upload directly to this movie
+        try {
+          setIsUploadingPoster(true);
+          setPosterError(null);
 
-        const uploadRes = await api.uploadPoster(selectedPosterFile);
-        finalPosterStorageId = uploadRes.fileId;
-        finalCustomPosterUrl = uploadRes.posterUrl;
-        finalPosterContentType = uploadRes.contentType;
-        finalPosterSize = uploadRes.size;
-      } catch (uploadErr: any) {
+          const uploadRes = await api.uploadMoviePoster(movie.id, selectedPosterFile);
+          finalPosterStorageId = uploadRes.movie?.posterStorageId || '';
+          finalCustomPosterUrl = uploadRes.posterUrl || uploadRes.movie?.customPosterUrl || '';
+          finalPosterContentType = uploadRes.movie?.posterContentType || '';
+          finalPosterSize = uploadRes.movie?.posterSize || 0;
+        } catch (uploadErr: any) {
+          setIsUploadingPoster(false);
+          setPosterError(`Upload failed: ${uploadErr.message || 'Could not store poster.'}`);
+          return;
+        } finally {
+          setIsUploadingPoster(false);
+        }
+      } else {
+        // ADD MODE: Movie must exist first to attach poster
+        setPosterError(
+          '⚠️ Poster upload is only available in edit mode. Please save the movie first, then edit it to add a poster.'
+        );
         setIsUploadingPoster(false);
-        setPosterError(`Upload failed: ${uploadErr.message || 'Could not store poster in MongoDB GridFS.'}`);
         return;
-      } finally {
-        setIsUploadingPoster(false);
       }
-    } else if (!posterPreviewUrl) {
-      // User explicitly removed the poster
+    } else if (!posterPreviewUrl && movie) {
+      // Edit mode: User removed the poster
       finalPosterStorageId = '';
       finalCustomPosterUrl = '';
       finalPosterContentType = '';
@@ -332,7 +330,6 @@ export const MovieEditModal: React.FC<MovieEditModalProps> = ({
     onClose();
   };
 
-  // Mock movie object for real-time live artwork & poster preview
   const previewMovie: Movie = {
     id: 'preview-id',
     title: title || 'Movie Title',
@@ -366,7 +363,6 @@ export const MovieEditModal: React.FC<MovieEditModalProps> = ({
         aria-modal="true"
         aria-labelledby="movie-edit-title"
       >
-        {/* Header */}
         <div className="px-6 py-4 bg-[#120c22] border-b border-purple-950/60 flex items-center justify-between shrink-0">
           <div className="flex items-center gap-2.5">
             <div className="w-8 h-8 rounded-lg bg-gradient-to-br from-purple-600 to-violet-800 flex items-center justify-center text-white">
@@ -390,7 +386,6 @@ export const MovieEditModal: React.FC<MovieEditModalProps> = ({
           </button>
         </div>
 
-        {/* Form Body */}
         <form onSubmit={handleSubmit} className="p-6 overflow-y-auto space-y-6 flex-1">
           {error && (
             <div className="p-3 bg-red-950/50 border border-red-800/60 rounded-xl text-xs text-red-200 flex items-center gap-2">
@@ -400,9 +395,7 @@ export const MovieEditModal: React.FC<MovieEditModalProps> = ({
           )}
 
           <div className="grid grid-cols-1 md:grid-cols-12 gap-6">
-            {/* Left Core Movie Metadata Column */}
             <div className="md:col-span-7 space-y-4">
-              {/* Title */}
               <div>
                 <label className="block text-xs font-semibold text-zinc-300 mb-1">
                   Movie Title <span className="text-purple-400">*</span>
@@ -417,7 +410,6 @@ export const MovieEditModal: React.FC<MovieEditModalProps> = ({
                 />
               </div>
 
-              {/* Tagline */}
               <div>
                 <label className="block text-xs font-semibold text-zinc-300 mb-1">
                   Tagline / Hook (Optional)
@@ -431,7 +423,6 @@ export const MovieEditModal: React.FC<MovieEditModalProps> = ({
                 />
               </div>
 
-              {/* Synopsis */}
               <div>
                 <label className="block text-xs font-semibold text-zinc-300 mb-1">
                   Synopsis / Description <span className="text-purple-400">*</span>
@@ -446,7 +437,6 @@ export const MovieEditModal: React.FC<MovieEditModalProps> = ({
                 />
               </div>
 
-              {/* Pricing, Year, and Duration */}
               <div className="grid grid-cols-3 gap-3">
                 <div>
                   <label className="block text-xs font-semibold text-purple-300 mb-1">
@@ -462,9 +452,7 @@ export const MovieEditModal: React.FC<MovieEditModalProps> = ({
                 </div>
 
                 <div>
-                  <label className="block text-xs font-semibold text-zinc-300 mb-1">
-                    Release Year
-                  </label>
+                  <label className="block text-xs font-semibold text-zinc-300 mb-1">Release Year</label>
                   <input
                     type="number"
                     value={year}
@@ -474,9 +462,7 @@ export const MovieEditModal: React.FC<MovieEditModalProps> = ({
                 </div>
 
                 <div>
-                  <label className="block text-xs font-semibold text-zinc-300 mb-1">
-                    Duration
-                  </label>
+                  <label className="block text-xs font-semibold text-zinc-300 mb-1">Duration</label>
                   <input
                     type="text"
                     value={duration}
@@ -487,12 +473,9 @@ export const MovieEditModal: React.FC<MovieEditModalProps> = ({
                 </div>
               </div>
 
-              {/* Director and Rating */}
               <div className="grid grid-cols-2 gap-3">
                 <div>
-                  <label className="block text-xs font-semibold text-zinc-300 mb-1">
-                    Director
-                  </label>
+                  <label className="block text-xs font-semibold text-zinc-300 mb-1">Director</label>
                   <input
                     type="text"
                     value={director}
@@ -503,9 +486,7 @@ export const MovieEditModal: React.FC<MovieEditModalProps> = ({
                 </div>
 
                 <div>
-                  <label className="block text-xs font-semibold text-zinc-300 mb-1">
-                    Rating
-                  </label>
+                  <label className="block text-xs font-semibold text-zinc-300 mb-1">Rating</label>
                   <select
                     value={rating}
                     onChange={(e) => setRating(e.target.value)}
@@ -519,7 +500,6 @@ export const MovieEditModal: React.FC<MovieEditModalProps> = ({
                 </div>
               </div>
 
-              {/* Cast */}
               <div>
                 <label className="block text-xs font-semibold text-zinc-300 mb-1">
                   Cast (comma-separated)
@@ -533,7 +513,6 @@ export const MovieEditModal: React.FC<MovieEditModalProps> = ({
                 />
               </div>
 
-              {/* Genres Picker */}
               <div>
                 <label className="block text-xs font-semibold text-zinc-300 mb-1.5">
                   Genres (Click to toggle)
@@ -559,12 +538,9 @@ export const MovieEditModal: React.FC<MovieEditModalProps> = ({
                 </div>
               </div>
 
-              {/* Master Formats */}
               <div className="grid grid-cols-2 gap-3">
                 <div>
-                  <label className="block text-xs font-semibold text-zinc-300 mb-1">
-                    Master Resolution
-                  </label>
+                  <label className="block text-xs font-semibold text-zinc-300 mb-1">Master Resolution</label>
                   <select
                     value={resolution}
                     onChange={(e) => setResolution(e.target.value as any)}
@@ -577,9 +553,7 @@ export const MovieEditModal: React.FC<MovieEditModalProps> = ({
                 </div>
 
                 <div>
-                  <label className="block text-xs font-semibold text-zinc-300 mb-1">
-                    Master Audio
-                  </label>
+                  <label className="block text-xs font-semibold text-zinc-300 mb-1">Master Audio</label>
                   <select
                     value={audio}
                     onChange={(e) => setAudio(e.target.value as any)}
@@ -591,7 +565,6 @@ export const MovieEditModal: React.FC<MovieEditModalProps> = ({
                 </div>
               </div>
 
-              {/* Telegram Channel Field */}
               <div className="p-3.5 rounded-xl bg-purple-950/20 border border-purple-900/40 space-y-1.5">
                 <label className="block text-xs font-semibold text-purple-300">
                   Associated Telegram VIP Channel ID / Handle
@@ -609,9 +582,7 @@ export const MovieEditModal: React.FC<MovieEditModalProps> = ({
               </div>
             </div>
 
-            {/* Right Column: Poster Upload & Live Artwork Preview */}
             <div className="md:col-span-5 space-y-4">
-              {/* Visible Poster Upload Section */}
               <div className="p-4 rounded-xl bg-[#140f24] border border-purple-900/50 space-y-3">
                 <div className="flex items-center justify-between">
                   <div className="flex items-center gap-2">
@@ -629,16 +600,22 @@ export const MovieEditModal: React.FC<MovieEditModalProps> = ({
                   Upload custom high-resolution key art directly into MongoDB GridFS. Max 5MB (JPG, PNG, WEBP, GIF, SVG).
                 </p>
 
-                {/* Hidden Real File Input */}
+                {!movie && (
+                  <div className="p-2.5 rounded-lg bg-amber-950/40 border border-amber-800/60 text-amber-200 text-[11px] flex items-start gap-2">
+                    <AlertCircle className="w-4 h-4 text-amber-400 shrink-0 mt-0.5" />
+                    <span>Save this movie first, then edit it to add a poster.</span>
+                  </div>
+                )}
+
                 <input
                   type="file"
                   ref={fileInputRef}
                   onChange={handlePosterFileChange}
                   accept="image/jpeg,image/jpg,image/png,image/webp,image/gif,image/svg+xml"
                   className="hidden"
+                  disabled={!movie}
                 />
 
-                {/* Upload Status / Validation Error */}
                 {posterError && (
                   <div className="p-2.5 rounded-lg bg-red-950/60 border border-red-800/70 text-red-200 text-xs flex items-start gap-2">
                     <AlertCircle className="w-4 h-4 text-red-400 shrink-0 mt-0.5" />
@@ -646,7 +623,6 @@ export const MovieEditModal: React.FC<MovieEditModalProps> = ({
                   </div>
                 )}
 
-                {/* Active Poster Controls: Preview & Actions */}
                 {posterPreviewUrl || customPosterUrl ? (
                   <div className="space-y-2.5">
                     <div className="flex items-center gap-3 p-2.5 rounded-lg bg-purple-950/30 border border-purple-900/60">
@@ -672,13 +648,12 @@ export const MovieEditModal: React.FC<MovieEditModalProps> = ({
                       </div>
                     </div>
 
-                    {/* Replace and Remove Buttons */}
                     <div className="flex items-center gap-2">
                       <button
                         type="button"
                         onClick={handleReplacePosterClick}
-                        className="flex-1 px-3 py-2 rounded-lg bg-purple-900/40 hover:bg-purple-900/70 border border-purple-700/50 text-purple-200 hover:text-white text-xs font-semibold flex items-center justify-center gap-1.5 transition-colors cursor-pointer"
-                        title="Select a different image file from your device"
+                        disabled={!movie}
+                        className="flex-1 px-3 py-2 rounded-lg bg-purple-900/40 hover:bg-purple-900/70 border border-purple-700/50 text-purple-200 hover:text-white text-xs font-semibold flex items-center justify-center gap-1.5 transition-colors cursor-pointer disabled:opacity-50"
                       >
                         <RefreshCw className="w-3.5 h-3.5" />
                         <span>Replace Poster</span>
@@ -688,7 +663,6 @@ export const MovieEditModal: React.FC<MovieEditModalProps> = ({
                         type="button"
                         onClick={handleRemovePosterClick}
                         className="px-3 py-2 rounded-lg bg-red-950/40 hover:bg-red-900/60 border border-red-800/50 text-red-300 hover:text-red-100 text-xs font-semibold flex items-center justify-center gap-1.5 transition-colors cursor-pointer"
-                        title="Remove custom poster and revert to procedural motif"
                       >
                         <Trash2 className="w-3.5 h-3.5" />
                         <span>Remove</span>
@@ -696,17 +670,19 @@ export const MovieEditModal: React.FC<MovieEditModalProps> = ({
                     </div>
                   </div>
                 ) : (
-                  /* Empty state: Select poster from device */
                   <div>
                     <button
                       type="button"
-                      onClick={() => fileInputRef.current?.click()}
-                      className="w-full p-4 rounded-xl border-2 border-dashed border-purple-800/60 hover:border-purple-500 bg-purple-950/20 hover:bg-purple-950/40 text-purple-300 hover:text-white transition-all flex flex-col items-center justify-center gap-2 cursor-pointer group"
+                      onClick={() => movie && fileInputRef.current?.click()}
+                      disabled={!movie}
+                      className="w-full p-4 rounded-xl border-2 border-dashed border-purple-800/60 hover:border-purple-500 bg-purple-950/20 hover:bg-purple-950/40 text-purple-300 hover:text-white transition-all flex flex-col items-center justify-center gap-2 cursor-pointer group disabled:opacity-50 disabled:cursor-not-allowed"
                     >
                       <div className="w-9 h-9 rounded-full bg-purple-900/60 group-hover:bg-purple-800/80 flex items-center justify-center text-purple-200 transition-colors">
                         <Upload className="w-4 h-4" />
                       </div>
-                      <span className="text-xs font-bold">Select Poster from Device</span>
+                      <span className="text-xs font-bold">
+                        {movie ? 'Select Poster from Device' : 'Save Movie First to Add Poster'}
+                      </span>
                       <span className="text-[10px] text-zinc-400">
                         PNG, JPG, WEBP, or GIF up to 5MB
                       </span>
@@ -715,7 +691,6 @@ export const MovieEditModal: React.FC<MovieEditModalProps> = ({
                 )}
               </div>
 
-              {/* Fallback Procedural Motif Selector */}
               <div>
                 <label className="block text-xs font-semibold text-zinc-300 mb-1">
                   Procedural Artwork Motif (Fallback)
@@ -735,7 +710,6 @@ export const MovieEditModal: React.FC<MovieEditModalProps> = ({
                   <option value="archive">Archive Broadcast (Retro Waveform)</option>
                 </select>
 
-                {/* Real-time Miniature Poster Card Preview */}
                 <div className="rounded-xl overflow-hidden border border-purple-900/50 aspect-[3/4] bg-black shadow-lg relative">
                   <MoviePosterArt movie={previewMovie} variant="poster" className="w-full h-full object-cover" />
                   {isUploadingPoster && (
@@ -749,16 +723,11 @@ export const MovieEditModal: React.FC<MovieEditModalProps> = ({
                 </div>
               </div>
 
-              {/* Storefront Display Toggles */}
               <div className="p-3.5 rounded-xl bg-[#140f24] border border-purple-950/60 space-y-3">
                 <div className="flex items-center justify-between">
                   <div>
-                    <span className="text-xs font-semibold text-white block">
-                      Published on Storefront
-                    </span>
-                    <span className="text-[10px] text-zinc-400">
-                      Toggle visibility to public customers
-                    </span>
+                    <span className="text-xs font-semibold text-white block">Published on Storefront</span>
+                    <span className="text-[10px] text-zinc-400">Toggle visibility to public customers</span>
                   </div>
                   <input
                     type="checkbox"
@@ -770,12 +739,8 @@ export const MovieEditModal: React.FC<MovieEditModalProps> = ({
 
                 <div className="pt-2 border-t border-purple-950/60 flex items-center justify-between">
                   <div>
-                    <span className="text-xs font-semibold text-white block">
-                      Primary Featured Hero
-                    </span>
-                    <span className="text-[10px] text-zinc-400">
-                      Receives top showcase attention
-                    </span>
+                    <span className="text-xs font-semibold text-white block">Primary Featured Hero</span>
+                    <span className="text-[10px] text-zinc-400">Receives top showcase attention</span>
                   </div>
                   <input
                     type="checkbox"
@@ -788,7 +753,6 @@ export const MovieEditModal: React.FC<MovieEditModalProps> = ({
             </div>
           </div>
 
-          {/* Modal Footer Controls */}
           <div className="pt-4 border-t border-purple-950/60 flex items-center justify-end gap-3 shrink-0">
             <button
               type="button"
