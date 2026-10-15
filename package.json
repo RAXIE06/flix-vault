@@ -49,6 +49,6 @@
     "typescript": "^7.0.2"
   },
   "engines": {
-    "node": "20.x"
+    "node": "24.x"
   }
 }
