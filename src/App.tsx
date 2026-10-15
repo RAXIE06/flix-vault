@@ -113,7 +113,6 @@ export default function App() {
   // =========================================================================
 
   const handleAddMovie = async (newMovie: Movie) => {
-    // Await server confirmation before claiming success
     await api.createMovie(newMovie);
     await Promise.all([loadAdminData(), loadPublicStorefront()]);
   };
@@ -150,10 +149,13 @@ export default function App() {
     setAdminPanelOpen(true);
   };
 
-  const handleOpenAdminAccess = () => {
-    // Restore prompt for secret-code modal upon clicking Admin
+  // =========================================================================
+  // ADMIN ACCESS HANDLER — Discreet trigger for owner only
+  // =========================================================================
+  const handleOpenAdminAccess = useCallback(() => {
+    console.log('[FlixVault] Admin access requested — opening secret-code modal');
     setAdminModalOpen(true);
-  };
+  }, []);
 
   const handleAdminLogout = async () => {
     try {
@@ -186,7 +188,7 @@ export default function App() {
   return (
     <div className="min-h-screen bg-[#08070d] text-zinc-100 flex flex-col selection:bg-purple-600 selection:text-white">
       
-      {/* 1. PREMIUM COMPACT HEADER */}
+      {/* 1. PREMIUM COMPACT HEADER — No admin button here (discreet) */}
       <Header
         hasSecondaryMovies={secondaryMovies.length > 0}
         onNavigate={handleNavigate}
@@ -263,7 +265,7 @@ export default function App() {
         )}
       </main>
 
-      {/* 5. MINIMAL FOOTER with discreet Admin access */}
+      {/* 5. MINIMAL FOOTER with discreet Admin access (owner only) */}
       <Footer
         onOpenInfo={setInfoModalContent}
         onOpenAdminAccess={handleOpenAdminAccess}
