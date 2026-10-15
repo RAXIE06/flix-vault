@@ -2,24 +2,43 @@
 import express from 'express';
 import cookieParser from 'cookie-parser';
 import dotenv from 'dotenv';
-import { initDatabase } from '../server/db.js';
-import { publicRouter } from '../server/routes/public.js';
-import { adminRouter } from '../server/routes/admin.js';
+import mongoose from 'mongoose';
+import { initDatabase } from '../server/db';
+import { publicRouter } from '../server/routes/public';
+import { adminRouter } from '../server/routes/admin';
 
 dotenv.config();
 
+// ============================================================
+// FIRE-AND-FORGET DB CONNECTION
+// Don't block requests — MongoDB background mein connect hoga
+// ============================================================
+let dbConnectAttempted = false;
+
+function tryConnectDB() {
+  if (dbConnectAttempted) return;
+  dbConnectAttempted = true;
+
+  initDatabase()
+    .then((ok) => {
+      console.log('[DB] Background init result:', ok);
+    })
+    .catch((err) => {
+      console.error('[DB] Background init failed:', err?.message || err);
+      // Reset so next cold start retries
+      dbConnectAttempted = false;
+    });
+}
+
+// Trigger connection on module load (cold start)
+tryConnectDB();
+
+// ============================================================
+// EXPRESS APP
+// ============================================================
 const app = express();
 
-// ============================================================
-// CORE MIDDLEWARE
-// ============================================================
-app.use(express.json({ limit: '10mb' }));
-app.use(express.urlencoded({ extended: true, limit: '10mb' }));
-app.use(cookieParser());
-
-// ============================================================
-// CORS — Vercel ke liye zaroori (cross-domain cookies)
-// ============================================================
+// CORS — Vercel cross-domain cookies ke liye
 app.use((req, res, next) => {
   const origin = req.headers.origin;
   if (origin) {
@@ -34,36 +53,32 @@ app.use((req, res, next) => {
   next();
 });
 
-// ============================================================
-// LAZY DATABASE INIT — Cold start par ek baar hi chalta hai
-// ============================================================
-let dbInitPromise: Promise<any> | null = null;
+app.use(express.json({ limit: '10mb' }));
+app.use(express.urlencoded({ extended: true, limit: '10mb' }));
+app.use(cookieParser());
 
-app.use(async (_req, _res, next) => {
-  if (!dbInitPromise) {
-    dbInitPromise = initDatabase().catch((err) => {
-      console.error('[DB] Init failed:', err);
-      dbInitPromise = null; // Agla request par retry karega
-      return null;
-    });
-  }
-  try {
-    await dbInitPromise;
-  } catch {
-    // Ignore — routes have memory fallback
-  }
-  next();
+// ============================================================
+// HEALTH CHECK — never blocks on DB
+// ============================================================
+app.get('/api/health', (_req, res) => {
+  res.json({
+    status: 'ok',
+    database: {
+      connected: mongoose.connection.readyState === 1,
+      name: mongoose.connection.name || null,
+      readyState: mongoose.connection.readyState,
+    },
+    timestamp: new Date().toISOString(),
+  });
 });
 
 // ============================================================
-// ROUTES (server.ts se same — order important hai)
+// ROUTES
 // ============================================================
 app.use('/api/admin', adminRouter);
 app.use('/api', publicRouter);
 
-// ============================================================
-// API 404 — JSON return karega, HTML NAHI
-// ============================================================
+// API 404 — JSON return karega
 app.all('/api/*', (req, res) => {
   res.status(404).json({
     error: `API endpoint not found: ${req.method} ${req.originalUrl}`,
@@ -71,9 +86,7 @@ app.all('/api/*', (req, res) => {
   });
 });
 
-// ============================================================
-// GLOBAL ERROR HANDLER — JSON return karega
-// ============================================================
+// Global error handler — JSON return karega
 app.use(
   (
     err: any,
@@ -83,12 +96,10 @@ app.use(
   ) => {
     console.error('[GLOBAL ERROR]', err);
     res.status(err.status || 500).json({
-      error: err.message || 'Internal server error occurred.',
+      error: err.message || 'Internal server error',
     });
   }
 );
 
-// ============================================================
-// VERCEL SERVERLESS EXPORT
-// ============================================================
+// Vercel serverless export
 export default app;
