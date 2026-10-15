@@ -88,52 +88,68 @@ async function parseResponse<T = any>(res: Response, defaultError: string): Prom
 }
 
 export const api = {
-  // Public APIs
+  // =========================================================================
+  // PUBLIC APIS
+  // =========================================================================
+
   async getPublicMovies(): Promise<{ movies: Movie[]; storage: string }> {
-    const res = await fetch('/api/movies');
-    if (!res.ok) {
-      throw new Error(`Failed to load movies: ${res.statusText}`);
-    }
-    return res.json();
+    const res = await fetch('/api/movies', { credentials: 'include' });
+    return parseResponse<{ movies: Movie[]; storage: string }>(
+      res,
+      'Failed to load movies'
+    );
   },
 
-  async getPublicSettings(): Promise<{ featuredMovieId: string; storefrontMaxTitles: number; upiConfig?: any }> {
-    const res = await fetch('/api/settings');
-    if (!res.ok) {
-      throw new Error('Failed to load storefront settings.');
-    }
-    return res.json();
+  async getPublicSettings(): Promise<{
+    featuredMovieId: string;
+    storefrontMaxTitles: number;
+    upiConfig?: any;
+  }> {
+    const res = await fetch('/api/settings', { credentials: 'include' });
+    return parseResponse<{
+      featuredMovieId: string;
+      storefrontMaxTitles: number;
+      upiConfig?: any;
+    }>(res, 'Failed to load storefront settings');
   },
 
   async checkHealth(): Promise<{ status: string; database: any; paymentMode: string }> {
-    const res = await fetch('/api/health');
-    return res.json();
+    const res = await fetch('/api/health', { credentials: 'include' });
+    return parseResponse<{ status: string; database: any; paymentMode: string }>(
+      res,
+      'Health check failed'
+    );
   },
 
-  // UPI Order Generation (Pay-Per-Movie)
+  // =========================================================================
+  // UPI ORDER GENERATION (Pay-Per-Movie)
+  // =========================================================================
+
   async createUpiOrder(movieId: string): Promise<{ success: boolean; order: UpiPaymentOrder }> {
     const res = await fetch('/api/orders/create', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
+      credentials: 'include',
       body: JSON.stringify({ movieId }),
     });
 
-    const data = await res.json();
-    if (!res.ok) {
-      throw new Error(data.error || 'Failed to generate UPI payment order.');
-    }
-    return data;
+    return parseResponse<{ success: boolean; order: UpiPaymentOrder }>(
+      res,
+      'Failed to generate UPI payment order'
+    );
   },
 
   async getOrderStatus(orderId: string): Promise<UpiPaymentOrder> {
-    const res = await fetch(`/api/orders/${encodeURIComponent(orderId)}`);
-    if (!res.ok) {
-      throw new Error('Failed to retrieve order status.');
-    }
-    return res.json();
+    const res = await fetch(`/api/orders/${encodeURIComponent(orderId)}`, {
+      credentials: 'include',
+    });
+    return parseResponse<UpiPaymentOrder>(res, 'Failed to retrieve order status');
   },
 
-  // Admin Auth APIs
+  // =========================================================================
+  // ADMIN AUTH APIS
+  // =========================================================================
+
   async loginAdmin(accessCode: string): Promise<{ success: boolean; token?: string }> {
     const res = await fetch('/api/auth/login', {
       method: 'POST',
@@ -144,7 +160,7 @@ export const api = {
 
     const data = await parseResponse<{ success: boolean; token?: string }>(
       res,
-      'Invalid access code.'
+      'Invalid access code'
     );
 
     if (data.token) {
@@ -156,16 +172,22 @@ export const api = {
 
   async logoutAdmin(): Promise<void> {
     setStoredToken(null);
-    await fetch('/api/auth/logout', {
-      method: 'POST',
-      credentials: 'include',
-    });
+    try {
+      await fetch('/api/auth/logout', {
+        method: 'POST',
+        credentials: 'include',
+      });
+    } catch {
+      // Ignore logout errors — token already cleared locally
+    }
   },
 
   async checkAdminSession(): Promise<boolean> {
     try {
       const res = await fetchWithAuth('/api/auth/me');
       if (!res.ok) return false;
+      const contentType = res.headers.get('content-type') || '';
+      if (!contentType.includes('application/json')) return false;
       const data = await res.json();
       return !!data.authenticated;
     } catch {
@@ -175,27 +197,32 @@ export const api = {
 
   async getDbStatus(): Promise<{ success: boolean; dbStatus: any }> {
     const res = await fetchWithAuth('/api/admin/db/status');
-    if (!res.ok) {
-      throw new Error('Failed to retrieve database status.');
-    }
-    return res.json();
+    return parseResponse<{ success: boolean; dbStatus: any }>(
+      res,
+      'Failed to retrieve database status'
+    );
   },
 
   async retryDbConnection(): Promise<{ success: boolean; dbStatus: any; error?: string }> {
     const res = await fetchWithAuth('/api/admin/db/retry', {
       method: 'POST',
     });
-    return res.json();
+    return parseResponse<{ success: boolean; dbStatus: any; error?: string }>(
+      res,
+      'Failed to retry database connection'
+    );
   },
 
-  // Protected Admin APIs
+  // =========================================================================
+  // PROTECTED ADMIN MOVIE APIS
+  // =========================================================================
+
   async getAdminMovies(): Promise<{ movies: Movie[]; storage: string }> {
     const res = await fetchWithAuth('/api/admin/movies');
-    if (!res.ok) {
-      const err = await res.json().catch(() => ({}));
-      throw new Error(err.error || 'Failed to fetch admin movies.');
-    }
-    return res.json();
+    return parseResponse<{ movies: Movie[]; storage: string }>(
+      res,
+      'Failed to fetch admin movies'
+    );
   },
 
   async createMovie(movie: Partial<Movie>): Promise<Movie> {
@@ -204,10 +231,7 @@ export const api = {
       body: JSON.stringify(movie),
     });
 
-    const data = await res.json();
-    if (!res.ok) {
-      throw new Error(data.error || 'Failed to create movie.');
-    }
+    const data = await parseResponse<{ movie: Movie }>(res, 'Failed to create movie');
     return data.movie;
   },
 
@@ -217,10 +241,7 @@ export const api = {
       body: JSON.stringify(movie),
     });
 
-    const data = await res.json();
-    if (!res.ok) {
-      throw new Error(data.error || 'Failed to update movie.');
-    }
+    const data = await parseResponse<{ movie: Movie }>(res, 'Failed to update movie');
     return data.movie;
   },
 
@@ -229,10 +250,8 @@ export const api = {
       method: 'DELETE',
     });
 
-    if (!res.ok) {
-      const err = await res.json().catch(() => ({}));
-      throw new Error(err.error || 'Failed to delete movie.');
-    }
+    // DELETE usually returns JSON { success: true } or empty — parseResponse handles both
+    await parseResponse(res, 'Failed to delete movie');
   },
 
   async setFeaturedMovie(id: string): Promise<Movie> {
@@ -240,10 +259,7 @@ export const api = {
       method: 'PATCH',
     });
 
-    const data = await res.json();
-    if (!res.ok) {
-      throw new Error(data.error || 'Failed to set featured movie.');
-    }
+    const data = await parseResponse<{ movie: Movie }>(res, 'Failed to set featured movie');
     return data.movie;
   },
 
@@ -252,77 +268,98 @@ export const api = {
       method: 'PATCH',
     });
 
-    const data = await res.json();
-    if (!res.ok) {
-      throw new Error(data.error || 'Failed to toggle movie publication status.');
-    }
+    const data = await parseResponse<{ movie: Movie }>(
+      res,
+      'Failed to toggle movie publication status'
+    );
     return data.movie;
   },
 
+  // =========================================================================
+  // ADMIN SETTINGS
+  // =========================================================================
+
   async getAdminSettings(): Promise<{ settings: any; database: any }> {
     const res = await fetchWithAuth('/api/admin/settings');
-    if (!res.ok) {
-      throw new Error('Failed to load admin settings.');
-    }
-    return res.json();
+    return parseResponse<{ settings: any; database: any }>(
+      res,
+      'Failed to load admin settings'
+    );
   },
 
-  async updateAdminSettings(settings: Partial<TelegramConfig> | any): Promise<any> {
+  async updateAdminSettings(
+    settings: Partial<TelegramConfig> | any
+  ): Promise<any> {
     const res = await fetchWithAuth('/api/admin/settings', {
       method: 'PUT',
       body: JSON.stringify(settings),
     });
 
-    const data = await res.json();
-    if (!res.ok) {
-      throw new Error(data.error || 'Failed to update settings.');
-    }
+    const data = await parseResponse<{ settings: any }>(
+      res,
+      'Failed to update settings'
+    );
     return data.settings;
   },
 
+  // =========================================================================
+  // ADMIN ORDERS
+  // =========================================================================
+
   async getAdminOrders(): Promise<{ orders: UpiPaymentOrder[]; count: number }> {
     const res = await fetchWithAuth('/api/admin/orders');
-    if (!res.ok) {
-      throw new Error('Failed to load orders.');
-    }
-    return res.json();
+    return parseResponse<{ orders: UpiPaymentOrder[]; count: number }>(
+      res,
+      'Failed to load orders'
+    );
   },
+
+  // =========================================================================
+  // UPI CONFIG
+  // =========================================================================
 
   async getUpiConfig(): Promise<{ upiConfig: UpiConfig }> {
     const res = await fetchWithAuth('/api/admin/upi-config');
-    if (!res.ok) {
-      throw new Error('Failed to load UPI configuration.');
-    }
-    return res.json();
+    return parseResponse<{ upiConfig: UpiConfig }>(
+      res,
+      'Failed to load UPI configuration'
+    );
   },
 
-  async updateUpiConfig(upiConfig: Partial<UpiConfig>): Promise<{ success: boolean; upiConfig: UpiConfig }> {
+  async updateUpiConfig(
+    upiConfig: Partial<UpiConfig>
+  ): Promise<{ success: boolean; upiConfig: UpiConfig }> {
     const res = await fetchWithAuth('/api/admin/upi-config', {
       method: 'PUT',
       body: JSON.stringify(upiConfig),
     });
 
-    const data = await res.json();
-    if (!res.ok) {
-      throw new Error(data.error || 'Failed to update UPI configuration.');
-    }
-    return data;
+    return parseResponse<{ success: boolean; upiConfig: UpiConfig }>(
+      res,
+      'Failed to update UPI configuration'
+    );
   },
 
-  // Gmail IMAP & FamPay Verification APIs (Phase 3A)
+  // =========================================================================
+  // GMAIL IMAP & FAMPAY VERIFICATION APIS (Phase 3A)
+  // =========================================================================
+
   async getGmailStatus(): Promise<GmailConfigStatus> {
     const res = await fetchWithAuth('/api/admin/gmail/status');
-    if (!res.ok) {
-      throw new Error('Failed to load Gmail IMAP configuration status.');
-    }
-    return res.json();
+    return parseResponse<GmailConfigStatus>(
+      res,
+      'Failed to load Gmail IMAP configuration status'
+    );
   },
 
   async testGmailConnection(): Promise<GmailConnectionTestResult> {
     const res = await fetchWithAuth('/api/admin/gmail/test-connection', {
       method: 'POST',
     });
-    return res.json();
+    return parseResponse<GmailConnectionTestResult>(
+      res,
+      'Gmail IMAP connection test failed'
+    );
   },
 
   async diagnoseGmailParser(payload: {
@@ -336,11 +373,10 @@ export const api = {
       method: 'POST',
       body: JSON.stringify(payload),
     });
-    const data = await res.json();
-    if (!res.ok) {
-      throw new Error(data.error || 'Diagnostic parse failed.');
-    }
-    return data;
+    return parseResponse<{ success: boolean; result: FamPayDiagnosticResult }>(
+      res,
+      'Diagnostic parse failed'
+    );
   },
 
   async getRecentEmailAlerts(limit: number = 10): Promise<{
@@ -350,27 +386,42 @@ export const api = {
     error?: string;
   }> {
     const res = await fetchWithAuth(`/api/admin/gmail/recent-alerts?limit=${limit}`);
-    return res.json();
+    return parseResponse<{
+      success: boolean;
+      count: number;
+      emails: DiagnosticEmailSummary[];
+      error?: string;
+    }>(res, 'Failed to load recent email alerts');
   },
 
-  // Automated UPI Payment Verification APIs (Phase 3B)
+  // =========================================================================
+  // AUTOMATED UPI PAYMENT VERIFICATION APIS (Phase 3B)
+  // =========================================================================
+
   async verifyPayments(limit: number = 20): Promise<PaymentVerificationScanResponse> {
     const res = await fetchWithAuth('/api/admin/orders/verify-payments', {
       method: 'POST',
       body: JSON.stringify({ limit }),
     });
-    const data = await res.json();
-    if (!res.ok) {
-      throw new Error(data.error || 'Payment verification scan failed.');
-    }
-    return data;
+    return parseResponse<PaymentVerificationScanResponse>(
+      res,
+      'Payment verification scan failed'
+    );
   },
 
-  async verifySpecificOrder(orderId: string): Promise<{ success: boolean; order: UpiPaymentOrder | null; scanResult: PaymentVerificationScanResponse }> {
+  async verifySpecificOrder(orderId: string): Promise<{
+    success: boolean;
+    order: UpiPaymentOrder | null;
+    scanResult: PaymentVerificationScanResponse;
+  }> {
     const res = await fetchWithAuth(`/api/admin/orders/${orderId}/verify`, {
       method: 'POST',
     });
-    return res.json();
+    return parseResponse<{
+      success: boolean;
+      order: UpiPaymentOrder | null;
+      scanResult: PaymentVerificationScanResponse;
+    }>(res, 'Order verification failed');
   },
 
   async resolveOrderReview(
@@ -383,11 +434,10 @@ export const api = {
       method: 'POST',
       body: JSON.stringify({ action, note, utr }),
     });
-    const data = await res.json();
-    if (!res.ok) {
-      throw new Error(data.error || 'Failed to update order review status.');
-    }
-    return data;
+    return parseResponse<{ success: boolean; order: UpiPaymentOrder }>(
+      res,
+      'Failed to update order review status'
+    );
   },
 
   async simulateAlertVerification(payload: {
@@ -407,14 +457,18 @@ export const api = {
       method: 'POST',
       body: JSON.stringify(payload),
     });
-    const data = await res.json();
-    if (!res.ok) {
-      throw new Error(data.error || 'Alert verification simulation failed.');
-    }
-    return data;
+    return parseResponse<{
+      success: boolean;
+      parsedAlert: FamPayDiagnosticResult;
+      verificationResult: any;
+      order: UpiPaymentOrder;
+    }>(res, 'Alert verification simulation failed');
   },
 
-  // Movie Poster Upload & Storage APIs (Direct MongoDB GridFS)
+  // =========================================================================
+  // MOVIE POSTER UPLOAD & STORAGE APIS (Direct MongoDB GridFS)
+  // =========================================================================
+
   async uploadPoster(file: File): Promise<PosterUploadResponse> {
     const formData = new FormData();
     formData.append('poster', file);
@@ -425,30 +479,49 @@ export const api = {
     });
     return parseResponse<PosterUploadResponse>(
       res,
-      'Failed to upload poster image to MongoDB GridFS.'
+      'Failed to upload poster image to MongoDB GridFS'
     );
   },
 
   async uploadMoviePoster(
     movieId: string,
     file: File
-  ): Promise<{ success: boolean; movie: Movie; poster: PosterUploadResponse; message: string }> {
+  ): Promise<{
+    success: boolean;
+    movie: Movie;
+    poster: PosterUploadResponse;
+    message: string;
+  }> {
     const formData = new FormData();
     formData.append('poster', file);
 
-    const res = await fetchWithAuth(`/api/admin/movies/${encodeURIComponent(movieId)}/poster`, {
-      method: 'POST',
-      body: formData,
-    });
-    return parseResponse(res, 'Failed to attach poster image to movie.');
+    const res = await fetchWithAuth(
+      `/api/admin/movies/${encodeURIComponent(movieId)}/poster`,
+      {
+        method: 'POST',
+        body: formData,
+      }
+    );
+    return parseResponse<{
+      success: boolean;
+      movie: Movie;
+      poster: PosterUploadResponse;
+      message: string;
+    }>(res, 'Failed to attach poster image to movie');
   },
 
   async removeMoviePoster(
     movieId: string
   ): Promise<{ success: boolean; movie: Movie; message: string }> {
-    const res = await fetchWithAuth(`/api/admin/movies/${encodeURIComponent(movieId)}/poster`, {
-      method: 'DELETE',
-    });
-    return parseResponse(res, 'Failed to remove movie poster.');
+    const res = await fetchWithAuth(
+      `/api/admin/movies/${encodeURIComponent(movieId)}/poster`,
+      {
+        method: 'DELETE',
+      }
+    );
+    return parseResponse<{ success: boolean; movie: Movie; message: string }>(
+      res,
+      'Failed to remove movie poster'
+    );
   },
 };
