@@ -1,152 +1,94 @@
-// api/index.ts
+// api/index.ts — Vercel Serverless Entry Point
 import express from 'express';
-import mongoose from 'mongoose';
-import cors from 'cors';
+import cookieParser from 'cookie-parser';
+import dotenv from 'dotenv';
+import { initDatabase } from '../server/db';
+import { publicRouter } from '../server/routes/public';
+import { adminRouter } from '../server/routes/admin';
 
-// ============================================================
-// MongoDB Connection Cache — Vercel Serverless ke liye ZAROORI
-// ============================================================
-let cached = (global as any).mongoose;
+dotenv.config();
 
-if (!cached) {
-  cached = (global as any).mongoose = { conn: null, promise: null };
-}
-
-async function connectDB() {
-  if (cached.conn) {
-    return cached.conn;
-  }
-
-  if (!cached.promise) {
-    const MONGODB_URI = process.env.MONGODB_URI;
-    if (!MONGODB_URI) {
-      throw new Error('MONGODB_URI environment variable is not set in Vercel');
-    }
-
-    console.log('[DB] Connecting to MongoDB Atlas...');
-    cached.promise = mongoose.connect(MONGODB_URI, {
-      bufferCommands: false,
-      maxPoolSize: 5,
-      serverSelectionTimeoutMS: 10000,
-      socketTimeoutMS: 45000,
-    });
-  }
-
-  try {
-    cached.conn = await cached.promise;
-    console.log('[DB] MongoDB connected:', mongoose.connection.name);
-  } catch (e) {
-    cached.promise = null;
-    console.error('[DB] Connection failed:', e);
-    throw e;
-  }
-
-  return cached.conn;
-}
-
-// ============================================================
-// Express App
-// ============================================================
 const app = express();
 
-app.use(cors({
-  origin: true,
-  credentials: true,
-}));
-
-app.use(express.json({ limit: '25mb' }));
-app.use(express.urlencoded({ extended: true, limit: '25mb' }));
+// ============================================================
+// CORE MIDDLEWARE
+// ============================================================
+app.use(express.json({ limit: '10mb' }));
+app.use(express.urlencoded({ extended: true, limit: '10mb' }));
+app.use(cookieParser());
 
 // ============================================================
-// DB Connection Middleware — har request se pehle
+// CORS — Vercel ke liye zaroori (cross-domain cookies)
 // ============================================================
-app.use(async (req, res, next) => {
-  // Health check ko DB ke bina bhi chalne do
-  if (req.path === '/api/health') {
-    return next();
+app.use((req, res, next) => {
+  const origin = req.headers.origin;
+  if (origin) {
+    res.setHeader('Access-Control-Allow-Origin', origin);
+    res.setHeader('Access-Control-Allow-Credentials', 'true');
+    res.setHeader('Access-Control-Allow-Methods', 'GET,POST,PUT,PATCH,DELETE,OPTIONS');
+    res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization');
   }
+  if (req.method === 'OPTIONS') {
+    return res.status(204).end();
+  }
+  next();
+});
 
-  try {
-    await connectDB();
-    next();
-  } catch (err: any) {
-    console.error('[DB MIDDLEWARE ERROR]', err);
-    res.status(500).json({
-      error: 'Database connection failed',
-      details: err.message,
+// ============================================================
+// LAZY DATABASE INIT — Cold start par ek baar hi chalta hai
+// ============================================================
+let dbInitPromise: Promise<any> | null = null;
+
+app.use(async (_req, _res, next) => {
+  if (!dbInitPromise) {
+    dbInitPromise = initDatabase().catch((err) => {
+      console.error('[DB] Init failed:', err);
+      dbInitPromise = null; // Agla request par retry karega
+      return null;
     });
   }
+  try {
+    await dbInitPromise;
+  } catch {
+    // Ignore — routes have memory fallback
+  }
+  next();
 });
 
 // ============================================================
-// 🚨 YAHAN APNE SAARE ROUTES PASTE KARO (server.ts se)
+// ROUTES (server.ts se same — order important hai)
 // ============================================================
-// Example structure — tumhare actual routes yahan aayenge:
-
-// import authRoutes from './routes/auth';
-// app.use('/api/auth', authRoutes);
-
-// import movieRoutes from './routes/movies';
-// app.use('/api', movieRoutes);
-
-// import orderRoutes from './routes/orders';
-// app.use('/api/orders', orderRoutes);
-
-// import adminRoutes from './routes/admin';
-// app.use('/api/admin', adminRoutes);
-
-// ... etc
+app.use('/api/admin', adminRouter);
+app.use('/api', publicRouter);
 
 // ============================================================
-// Health Check
+// API 404 — JSON return karega, HTML NAHI
 // ============================================================
-app.get('/api/health', (req, res) => {
-  const connected = mongoose.connection.readyState === 1;
-  res.json({
-    status: 'ok',
-    database: {
-      connected,
-      name: mongoose.connection.name || null,
-      host: mongoose.connection.host || null,
-    },
-    paymentMode: process.env.PAYMENT_MODE || 'upi',
-    timestamp: new Date().toISOString(),
-  });
-});
-
-// ============================================================
-// API 404 — HTML nahi, JSON return karega
-// ============================================================
-app.use('/api', (req, res) => {
+app.all('/api/*', (req, res) => {
   res.status(404).json({
-    error: `API route not found: ${req.method} ${req.originalUrl}`,
+    error: `API endpoint not found: ${req.method} ${req.originalUrl}`,
+    code: 'NOT_FOUND',
   });
 });
 
 // ============================================================
-// Global Error Handler
+// GLOBAL ERROR HANDLER — JSON return karega
 // ============================================================
-app.use((
-  err: any,
-  req: express.Request,
-  res: express.Response,
-  next: express.NextFunction
-) => {
-  console.error('[GLOBAL ERROR]', err);
-
-  if (err.type === 'entity.too.large') {
-    return res.status(413).json({ error: 'File too large (max 25MB)' });
+app.use(
+  (
+    err: any,
+    _req: express.Request,
+    res: express.Response,
+    _next: express.NextFunction
+  ) => {
+    console.error('[GLOBAL ERROR]', err);
+    res.status(err.status || 500).json({
+      error: err.message || 'Internal server error occurred.',
+    });
   }
-  if (err.name === 'MulterError') {
-    return res.status(400).json({ error: `Upload error: ${err.code}` });
-  }
-
-  res.status(err.status || 500).json({
-    error: err.message || 'Internal server error',
-  });
-});
+);
 
 // ============================================================
-// Vercel Serverless Export (app.listen NAHI karna)
+// VERCEL SERVERLESS EXPORT
 // ============================================================
 export default app;
