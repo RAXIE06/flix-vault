@@ -3,6 +3,7 @@ import express from 'express';
 import cookieParser from 'cookie-parser';
 import dotenv from 'dotenv';
 import mongoose from 'mongoose';
+import crypto from 'crypto';
 
 dotenv.config();
 
@@ -40,7 +41,6 @@ async function connectDB() {
   return cached.conn;
 }
 
-// Fire connection attempt on cold start (non-blocking)
 connectDB().catch((e) => console.error('[DB] Initial connect failed:', e.message));
 
 // ============================================================
@@ -48,7 +48,6 @@ connectDB().catch((e) => console.error('[DB] Initial connect failed:', e.message
 // ============================================================
 const app = express();
 
-// CORS
 app.use((req, res, next) => {
   const origin = req.headers.origin;
   if (origin) {
@@ -66,7 +65,7 @@ app.use(express.urlencoded({ extended: true, limit: '15mb' }));
 app.use(cookieParser());
 
 // ============================================================
-// MODELS (inline — no separate import needed)
+// MODELS
 // ============================================================
 const MovieSchema = new mongoose.Schema({
   id: { type: String, required: true, unique: true, index: true },
@@ -108,6 +107,30 @@ const SettingsSchema = new mongoose.Schema({
 
 const SettingsModel = mongoose.models.StorefrontSettings || mongoose.model('StorefrontSettings', SettingsSchema);
 
+const OrderSchema = new mongoose.Schema({
+  orderId: { type: String, required: true, unique: true, index: true },
+  movieId: String,
+  movieTitle: String,
+  originalPrice: Number,
+  payableAmount: Number,
+  discountAmount: Number,
+  status: { type: String, default: 'pending' },
+  expiresAt: Date,
+  matchedUtr: String,
+  maskedUtr: String,
+  fampayTxnId: String,
+  verifiedAt: Date,
+  verificationReason: String,
+  matchedAmountPaise: Number,
+  matchedAmountRupees: Number,
+  userUtr: String,
+  upiVpa: String,
+  payeeName: String,
+  qrString: String,
+}, { timestamps: true, strict: false });
+
+const OrderModel = mongoose.models.Order || mongoose.model('Order', OrderSchema);
+
 // Poster storage in GridFS
 let gridfsBucket: any = null;
 function getBucket() {
@@ -122,7 +145,6 @@ function getBucket() {
 // ============================================================
 // ADMIN AUTH
 // ============================================================
-import crypto from 'crypto';
 const SESSION_COOKIE = 'flixvault_admin_session';
 const SECRET = process.env.SESSION_SECRET || 'flixvault_default_secret';
 const ADMIN_CODE = process.env.ADMIN_ACCESS_CODE || 'flixvault_admin_2026';
@@ -218,6 +240,80 @@ app.get('/api/movies/:id/poster', async (req, res) => {
 });
 
 // ============================================================
+// ORDER ROUTES (Pay-Per-Movie UPI)
+// ============================================================
+app.post('/api/orders/create', async (req, res) => {
+  try {
+    await connectDB();
+    const { movieId } = req.body || {};
+    if (!movieId) return res.status(400).json({ error: 'movieId is required' });
+
+    // Try DB first, fallback to any movie with this id
+    let movie = await MovieModel.findOne({ id: movieId }).lean();
+    if (!movie) {
+      // Check for enabled movies if exact match fails
+      const anyMovie = await MovieModel.findOne({}).lean();
+      if (!anyMovie) {
+        return res.status(404).json({ error: 'Movie not found in database' });
+      }
+      return res.status(404).json({ error: `Movie ${movieId} not found. Please save movies from admin panel first.` });
+    }
+
+    const settings = await SettingsModel.findOne({ key: 'global' }).lean();
+    const upiVpa = settings?.upiConfig?.upiVpa || process.env.UPI_VPA || 'flixvault@upi';
+    const payeeName = settings?.upiConfig?.payeeName || 'FlixVault Cinema';
+
+    // Random discount: ₹0.01 to ₹1.00
+    const discountRupees = Math.round((0.01 + Math.random() * 0.99) * 100) / 100;
+    const basePrice = movie.priceNumeric || 149;
+    const payableAmount = Math.round((basePrice - discountRupees) * 100) / 100;
+
+    const orderId = `FLX-${Date.now().toString(36).toUpperCase()}-${Math.random().toString(36).slice(2, 6).toUpperCase()}`;
+    const expiresAt = new Date(Date.now() + 5 * 60 * 1000);
+
+    const amountStr = payableAmount.toFixed(2);
+    const upiString = `upi://pay?pa=${encodeURIComponent(upiVpa)}&pn=${encodeURIComponent(payeeName)}&am=${amountStr}&cu=INR&tn=${encodeURIComponent(orderId)}`;
+
+    const order = new OrderModel({
+      orderId,
+      movieId: movie.id,
+      movieTitle: movie.title,
+      originalPrice: basePrice,
+      payableAmount,
+      discountAmount: discountRupees,
+      status: 'pending',
+      expiresAt,
+      upiVpa,
+      payeeName,
+      qrString: upiString,
+    });
+    await order.save();
+
+    res.json({ success: true, order });
+  } catch (err: any) {
+    console.error('[ORDER CREATE]', err.message);
+    res.status(500).json({ error: err.message || 'Failed to create order' });
+  }
+});
+
+app.get('/api/orders/:orderId', async (req, res) => {
+  try {
+    await connectDB();
+    const order = await OrderModel.findOne({ orderId: req.params.orderId });
+    if (!order) return res.status(404).json({ error: 'Order not found' });
+
+    if (order.status === 'pending' && order.expiresAt && new Date(order.expiresAt) < new Date()) {
+      order.status = 'expired';
+      await order.save();
+    }
+
+    res.json(order);
+  } catch (err: any) {
+    res.status(500).json({ error: 'Failed to load order' });
+  }
+});
+
+// ============================================================
 // AUTH ROUTES
 // ============================================================
 app.post('/api/auth/login', (req, res) => {
@@ -247,10 +343,8 @@ app.post('/api/auth/logout', (_req, res) => {
 });
 
 // ============================================================
-// ADMIN ROUTES (all protected)
+// ADMIN MOVIES
 // ============================================================
-
-// Get all movies (including drafts)
 app.get('/api/admin/movies', requireAdmin, async (_req, res) => {
   try {
     await connectDB();
@@ -261,7 +355,6 @@ app.get('/api/admin/movies', requireAdmin, async (_req, res) => {
   }
 });
 
-// Create movie
 app.post('/api/admin/movies', requireAdmin, async (req, res) => {
   try {
     await connectDB();
@@ -270,8 +363,14 @@ app.post('/api/admin/movies', requireAdmin, async (req, res) => {
     if (!data.synopsis?.trim()) return res.status(400).json({ error: 'Synopsis required' });
 
     const id = data.id || `mv-${Date.now().toString().slice(-6)}`;
-    const movie = new MovieModel({ ...data, id });
-    await movie.save();
+
+    // Upsert — create or update existing
+    const movie = await MovieModel.findOneAndUpdate(
+      { id },
+      { ...data, id },
+      { new: true, upsert: true, setDefaultsOnInsert: true }
+    );
+
     res.status(201).json({ success: true, movie });
   } catch (err: any) {
     console.error('[CREATE MOVIE]', err.message);
@@ -279,23 +378,20 @@ app.post('/api/admin/movies', requireAdmin, async (req, res) => {
   }
 });
 
-// Update movie
 app.put('/api/admin/movies/:id', requireAdmin, async (req, res) => {
   try {
     await connectDB();
     const movie = await MovieModel.findOneAndUpdate(
       { id: req.params.id },
-      { ...req.body },
-      { new: true }
+      { ...req.body, id: req.params.id },
+      { new: true, upsert: true, setDefaultsOnInsert: true }
     );
-    if (!movie) return res.status(404).json({ error: 'Movie not found' });
     res.json({ success: true, movie });
   } catch (err: any) {
     res.status(500).json({ error: err.message });
   }
 });
 
-// Delete movie
 app.delete('/api/admin/movies/:id', requireAdmin, async (req, res) => {
   try {
     await connectDB();
@@ -316,7 +412,6 @@ app.delete('/api/admin/movies/:id', requireAdmin, async (req, res) => {
   }
 });
 
-// Set featured
 app.patch('/api/admin/movies/:id/feature', requireAdmin, async (req, res) => {
   try {
     await connectDB();
@@ -333,7 +428,6 @@ app.patch('/api/admin/movies/:id/feature', requireAdmin, async (req, res) => {
   }
 });
 
-// Toggle enabled
 app.patch('/api/admin/movies/:id/toggle', requireAdmin, async (req, res) => {
   try {
     await connectDB();
@@ -348,8 +442,7 @@ app.patch('/api/admin/movies/:id/toggle', requireAdmin, async (req, res) => {
 });
 
 // ============================================================
-// POSTER UPLOAD (Base64 — no multer needed on Vercel)
-// Auto-creates movie in MongoDB if not found
+// POSTER UPLOAD (Base64) — Auto-creates movie if not found
 // ============================================================
 app.post('/api/admin/movies/:id/poster', requireAdmin, async (req, res) => {
   try {
@@ -373,14 +466,13 @@ app.post('/api/admin/movies/:id/poster', requireAdmin, async (req, res) => {
       return res.status(400).json({ error: 'Image too large (max 5MB)' });
     }
 
-    // Find OR auto-create movie in MongoDB
     let movie = await MovieModel.findOne({ id: req.params.id });
     if (!movie) {
-      console.log(`[POSTER] Auto-creating movie in MongoDB: ${req.params.id}`);
+      console.log(`[POSTER] Auto-creating movie: ${req.params.id}`);
       movie = new MovieModel({
         id: req.params.id,
         title: req.params.id,
-        synopsis: 'Auto-created on poster upload — details will sync on next save.',
+        synopsis: 'Auto-created on poster upload.',
         isEnabled: false,
         isFeatured: false,
         genres: [],
@@ -405,7 +497,6 @@ app.post('/api/admin/movies/:id/poster', requireAdmin, async (req, res) => {
       await movie.save();
     }
 
-    // Delete old poster from GridFS if exists
     if (movie.posterStorageId) {
       try {
         const bucket = getBucket();
@@ -413,7 +504,6 @@ app.post('/api/admin/movies/:id/poster', requireAdmin, async (req, res) => {
       } catch (e) { /* ignore */ }
     }
 
-    // Store new poster in GridFS
     const bucket = getBucket();
     const uploadStream = bucket.openUploadStream(
       `poster_${req.params.id}_${Date.now()}`,
@@ -426,7 +516,6 @@ app.post('/api/admin/movies/:id/poster', requireAdmin, async (req, res) => {
       uploadStream.end(buffer);
     });
 
-    // Update movie with poster info
     movie.posterStorageId = uploadStream.id.toString();
     movie.customPosterUrl = `/api/movies/${req.params.id}/poster?v=${Date.now()}`;
     movie.posterContentType = ct;
@@ -446,8 +535,33 @@ app.post('/api/admin/movies/:id/poster', requireAdmin, async (req, res) => {
   }
 });
 
+app.delete('/api/admin/movies/:id/poster', requireAdmin, async (req, res) => {
+  try {
+    await connectDB();
+    const movie = await MovieModel.findOne({ id: req.params.id });
+    if (!movie) return res.status(404).json({ error: 'Movie not found' });
+
+    if (movie.posterStorageId) {
+      try {
+        const bucket = getBucket();
+        await bucket.delete(new mongoose.Types.ObjectId(movie.posterStorageId));
+      } catch (e) { /* ignore */ }
+    }
+
+    movie.posterStorageId = '';
+    movie.customPosterUrl = '';
+    movie.posterContentType = '';
+    movie.posterSize = 0;
+    await movie.save();
+
+    res.json({ success: true, movie });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 // ============================================================
-// SETTINGS
+// ADMIN SETTINGS
 // ============================================================
 app.get('/api/admin/settings', requireAdmin, async (_req, res) => {
   try {
@@ -474,23 +588,29 @@ app.put('/api/admin/settings', requireAdmin, async (req, res) => {
 });
 
 // ============================================================
-// DB STATUS / ORDERS / STUBS
+// ADMIN ORDERS
 // ============================================================
-app.get('/api/admin/db/status', requireAdmin, (_req, res) => {
-  res.json({
-    success: true,
-    dbStatus: {
-      connected: mongoose.connection.readyState === 1,
-      name: mongoose.connection.name,
-    },
-  });
+app.get('/api/admin/orders', requireAdmin, async (_req, res) => {
+  try {
+    await connectDB();
+    const orders = await OrderModel.find({}).sort({ createdAt: -1 }).limit(50).lean();
+
+    // Auto-expire pending orders
+    const now = new Date();
+    const sanitized = orders.map((o: any) => {
+      if (o.status === 'pending' && o.expiresAt && new Date(o.expiresAt) < now) {
+        o.status = 'expired';
+      }
+      return o;
+    });
+
+    res.json({ orders: sanitized, count: sanitized.length });
+  } catch (err: any) {
+    res.status(500).json({ error: 'Failed to load orders' });
+  }
 });
 
-app.get('/api/admin/orders', requireAdmin, (_req, res) => {
-  res.json({ orders: [], count: 0 });
-});
-
-app.post('/api/admin/orders/verify-payments', requireAdmin, (_req, res) => {
+app.post('/api/admin/orders/verify-payments', requireAdmin, async (_req, res) => {
   res.json({
     success: true,
     scannedEmailsCount: 0,
@@ -499,6 +619,19 @@ app.post('/api/admin/orders/verify-payments', requireAdmin, (_req, res) => {
     duplicatesRejectedCount: 0,
     details: [],
     durationMs: 0,
+  });
+});
+
+// ============================================================
+// DB STATUS
+// ============================================================
+app.get('/api/admin/db/status', requireAdmin, (_req, res) => {
+  res.json({
+    success: true,
+    dbStatus: {
+      connected: mongoose.connection.readyState === 1,
+      name: mongoose.connection.name,
+    },
   });
 });
 
