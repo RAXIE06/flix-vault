@@ -349,6 +349,7 @@ app.patch('/api/admin/movies/:id/toggle', requireAdmin, async (req, res) => {
 
 // ============================================================
 // POSTER UPLOAD (Base64 — no multer needed on Vercel)
+// Auto-creates movie in MongoDB if not found
 // ============================================================
 app.post('/api/admin/movies/:id/poster', requireAdmin, async (req, res) => {
   try {
@@ -359,26 +360,52 @@ app.post('/api/admin/movies/:id/poster', requireAdmin, async (req, res) => {
       return res.status(400).json({ error: 'No image data provided' });
     }
 
-    // Validate content type
     const allowed = ['image/jpeg', 'image/png', 'image/webp'];
     const ct = contentType || 'image/jpeg';
     if (!allowed.includes(ct)) {
       return res.status(400).json({ error: 'Only JPG/PNG/WEBP allowed' });
     }
 
-    // Strip data URL prefix if present
     const base64Data = String(imageBase64).replace(/^data:image\/\w+;base64,/, '');
     const buffer = Buffer.from(base64Data, 'base64');
 
-    // Size check (5MB max)
     if (buffer.length > 5 * 1024 * 1024) {
       return res.status(400).json({ error: 'Image too large (max 5MB)' });
     }
 
-    const movie = await MovieModel.findOne({ id: req.params.id });
-    if (!movie) return res.status(404).json({ error: 'Movie not found' });
+    // Find OR auto-create movie in MongoDB
+    let movie = await MovieModel.findOne({ id: req.params.id });
+    if (!movie) {
+      console.log(`[POSTER] Auto-creating movie in MongoDB: ${req.params.id}`);
+      movie = new MovieModel({
+        id: req.params.id,
+        title: req.params.id,
+        synopsis: 'Auto-created on poster upload — details will sync on next save.',
+        isEnabled: false,
+        isFeatured: false,
+        genres: [],
+        cast: [],
+        year: new Date().getFullYear(),
+        duration: '2h 00m',
+        rating: 'PG-13',
+        director: '',
+        priceSample: '₹149',
+        priceNumeric: 149,
+        resolution: '4K IMAX',
+        audio: 'Dolby Atmos',
+        accessType: 'pay_per_movie',
+        accessLabel: 'Pay per Movie',
+        artwork: {
+          bgGradient: 'from-violet-950 to-black',
+          glowColor: '#a855f7',
+          accentColor: '#c084fc',
+          motif: 'nebula',
+        },
+      });
+      await movie.save();
+    }
 
-    // Delete old poster
+    // Delete old poster from GridFS if exists
     if (movie.posterStorageId) {
       try {
         const bucket = getBucket();
@@ -399,7 +426,7 @@ app.post('/api/admin/movies/:id/poster', requireAdmin, async (req, res) => {
       uploadStream.end(buffer);
     });
 
-    // Update movie
+    // Update movie with poster info
     movie.posterStorageId = uploadStream.id.toString();
     movie.customPosterUrl = `/api/movies/${req.params.id}/poster?v=${Date.now()}`;
     movie.posterContentType = ct;
@@ -416,32 +443,6 @@ app.post('/api/admin/movies/:id/poster', requireAdmin, async (req, res) => {
   } catch (err: any) {
     console.error('[POSTER UPLOAD]', err.message);
     res.status(500).json({ error: err.message || 'Poster upload failed' });
-  }
-});
-
-// Remove poster
-app.delete('/api/admin/movies/:id/poster', requireAdmin, async (req, res) => {
-  try {
-    await connectDB();
-    const movie = await MovieModel.findOne({ id: req.params.id });
-    if (!movie) return res.status(404).json({ error: 'Movie not found' });
-
-    if (movie.posterStorageId) {
-      try {
-        const bucket = getBucket();
-        await bucket.delete(new mongoose.Types.ObjectId(movie.posterStorageId));
-      } catch (e) { /* ignore */ }
-    }
-
-    movie.posterStorageId = '';
-    movie.customPosterUrl = '';
-    movie.posterContentType = '';
-    movie.posterSize = 0;
-    await movie.save();
-
-    res.json({ success: true, movie });
-  } catch (err: any) {
-    res.status(500).json({ error: err.message });
   }
 });
 
