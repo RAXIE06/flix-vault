@@ -1,0 +1,7 @@
+{
+  "name": "FlixVault",
+  "description": "FlixVault is a premium mobile-first cinema showcase featuring curated 4K titles, instant UPI pay-per-movie purchasing, and secure administrative management.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
+
