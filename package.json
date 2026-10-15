@@ -3,15 +3,15 @@
   "private": true,
   "version": "0.0.0",
   "type": "module",
-"scripts": {
-  "dev": "tsx server.ts",
-  "start": "tsx server.ts",
-  "build": "vite build && esbuild vercel-api.ts --bundle --platform=node --target=node20 --format=cjs --outfile=api/index.cjs"
-  "preview": "vite preview",
-  "clean": "rm -rf dist server.js",
-  "lint": "tsc --noEmit",
-  "test": "tsx tests/verify-upi-qr.ts && tsx tests/gmail-imap-parser.test.ts && tsx tests/payment-verification.test.ts && tsx tests/poster-storage.test.ts && tsx tests/regressions.test.ts"
-},
+  "scripts": {
+    "dev": "tsx server.ts",
+    "start": "tsx server.ts",
+    "build": "vite build && esbuild vercel-api.ts --bundle --platform=node --target=node20 --format=cjs --outfile=api/index.cjs",
+    "preview": "vite preview",
+    "clean": "rm -rf dist server.js",
+    "lint": "tsc --noEmit",
+    "test": "tsx tests/verify-upi-qr.ts && tsx tests/gmail-imap-parser.test.ts && tsx tests/payment-verification.test.ts && tsx tests/poster-storage.test.ts && tsx tests/regressions.test.ts"
+  },
   "dependencies": {
     "@google/genai": "^2.4.0",
     "@tailwindcss/vite": "^4.3.3",
