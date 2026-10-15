@@ -5,12 +5,11 @@
   "framework": "vite",
   "installCommand": "npm install",
   "functions": {
-    "api/index.ts": {
-      "maxDuration": 30,
-      "includeFiles": "{server,src}/**"
+    "api/index.cjs": {
+      "maxDuration": 30
     }
   },
   "rewrites": [
-    { "source": "/api/:path*", "destination": "/api" }
+    { "source": "/api/:path*", "destination": "/api/index.cjs" }
   ]
 }
