@@ -1,5 +1,5 @@
 import React from 'react';
-import { Film, Lock } from 'lucide-react';
+import { Film, Lock, MessageCircle } from 'lucide-react';
 import { InfoModalContent } from '../types';
 
 interface FooterProps {
@@ -32,8 +32,8 @@ export const Footer: React.FC<FooterProps> = ({ onOpenInfo, onOpenAdminAccess })
             </div>
           </div>
 
-          {/* Quick Navigation / Legal Columns */}
-          <div className="md:col-span-7 grid grid-cols-2 sm:grid-cols-3 gap-6">
+          {/* Quick Navigation / Legal / Support Columns */}
+          <div className="md:col-span-7 grid grid-cols-2 sm:grid-cols-4 gap-6">
             
             {/* Catalog Links */}
             <div>
@@ -79,7 +79,7 @@ export const Footer: React.FC<FooterProps> = ({ onOpenInfo, onOpenAdminAccess })
               </ul>
             </div>
 
-            {/* Legal & Administration */}
+            {/* Legal */}
             <div>
               <h4 className="font-semibold text-white uppercase tracking-wider text-[11px] mb-3 font-mono">
                 Legal
@@ -104,18 +104,41 @@ export const Footer: React.FC<FooterProps> = ({ onOpenInfo, onOpenAdminAccess })
               </ul>
             </div>
 
+            {/* Support */}
+            <div>
+              <h4 className="font-semibold text-white uppercase tracking-wider text-[11px] mb-3 font-mono">
+                Support
+              </h4>
+              <ul className="space-y-2">
+                <li>
+                  <a
+                    href="https://t.me/Owner_helpbot"
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="hover:text-purple-300 transition-colors flex items-center gap-1.5 group"
+                  >
+                    <MessageCircle className="w-3.5 h-3.5 text-purple-400 group-hover:text-purple-300 transition-colors" />
+                    <span>Need Help? Chat with us</span>
+                  </a>
+                </li>
+                <li className="text-zinc-500 text-[11px] font-mono pl-5">
+                  @Owner_helpbot
+                </li>
+              </ul>
+            </div>
+
           </div>
 
         </div>
 
-        {/* Bottom Bar: Copyright notice, Disclaimer, and Subtle Admin Access Button */}
+        {/* Bottom Bar */}
         <div className="pt-8 flex flex-col sm:flex-row items-center justify-between gap-4 text-[11px] text-zinc-500">
           <div>
             &copy; 2026 FlixVault. All rights reserved. Cinematic streaming catalog.
           </div>
           
           <div className="flex items-center gap-4">
-            <span>Sample Data Mode</span>
+            <span>Secure UPI Payments · Instant Delivery</span>
             <span aria-hidden="true">·</span>
             
             {/* Subtle Admin Access Button */}
