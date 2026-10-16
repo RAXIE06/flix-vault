@@ -1,9 +1,11 @@
-// api/index.ts — Full Backend (MongoDB + Telegram Integration)
+// api/index.ts — Full Backend (MongoDB + Telegram + Gmail IMAP)
 import express from 'express';
 import cookieParser from 'cookie-parser';
 import dotenv from 'dotenv';
 import mongoose from 'mongoose';
 import crypto from 'crypto';
+import { ImapFlow } from 'imapflow';
+import { simpleParser } from 'mailparser';
 
 dotenv.config();
 
@@ -238,6 +240,286 @@ async function generateTelegramInviteLink(
 }
 
 // ============================================================
+// GMAIL IMAP — FamApp Payment Verification
+// ============================================================
+interface FamAppParsedAlert {
+  isValid: boolean;
+  amount?: number;
+  utr?: string;
+  fampayTxnId?: string;
+  sender?: string;
+  receivedAt?: Date;
+  detectionReason?: string;
+}
+
+function getGmailConfig() {
+  return {
+    user: process.env.GMAIL_USER || '',
+    appPassword: process.env.GMAIL_APP_PASSWORD || '',
+    host: process.env.GMAIL_IMAP_HOST || 'imap.gmail.com',
+    port: parseInt(process.env.GMAIL_IMAP_PORT || '993', 10),
+    verifiedSender: process.env.GMAIL_VERIFIED_SENDER || 'no-reply@famapp.in',
+  };
+}
+
+function isGmailConfigured(): boolean {
+  const c = getGmailConfig();
+  return !!(c.user && c.appPassword);
+}
+
+function parseFamAppEmail(from: string, subject: string, text: string): FamAppParsedAlert {
+  const config = getGmailConfig();
+  const result: FamAppParsedAlert = { isValid: false, sender: from };
+
+  const senderLower = (from || '').toLowerCase();
+  const verifiedLower = config.verifiedSender.toLowerCase();
+  if (!senderLower.includes(verifiedLower)) {
+    result.detectionReason = `Sender mismatch: ${from}`;
+    return result;
+  }
+
+  const body = text || '';
+
+  const amountPatterns = [
+    /₹\s*([\d,]+\.?\d*)/,
+    /Rs\.?\s*([\d,]+\.?\d*)/i,
+    /INR\s*([\d,]+\.?\d*)/i,
+  ];
+  let amount: number | undefined;
+  for (const p of amountPatterns) {
+    const m = body.match(p);
+    if (m) {
+      amount = parseFloat(m[1].replace(/,/g, ''));
+      if (!isNaN(amount)) break;
+    }
+  }
+  if (!amount) {
+    result.detectionReason = 'Amount not found';
+    return result;
+  }
+  result.amount = amount;
+
+  const utrMatch = body.match(/UTR[:\s]*(\d{12})/i) || body.match(/\b(\d{12})\b/);
+  if (utrMatch) result.utr = utrMatch[1];
+
+  const txnMatch = body.match(/transaction\s*id[:\s]*([A-Z0-9]+)/i) || body.match(/\b(FMP[A-Z0-9]+)\b/i);
+  if (txnMatch) result.fampayTxnId = txnMatch[1];
+
+  const successKeywords = ['received', 'success', 'credited'];
+  const hasSuccess = successKeywords.some(
+    (k) => body.toLowerCase().includes(k) || subject.toLowerCase().includes(k)
+  );
+  if (!hasSuccess) {
+    result.detectionReason = 'No success keyword';
+    return result;
+  }
+
+  result.isValid = true;
+  return result;
+}
+
+async function fetchRecentEmails(limit: number = 20) {
+  const config = getGmailConfig();
+  if (!isGmailConfigured()) {
+    throw new Error('Gmail not configured. Set GMAIL_USER and GMAIL_APP_PASSWORD.');
+  }
+
+  const client = new ImapFlow({
+    host: config.host,
+    port: config.port,
+    secure: true,
+    auth: { user: config.user, pass: config.appPassword },
+    logger: false,
+  } as any);
+
+  const emails: any[] = [];
+
+  try {
+    await client.connect();
+    const lock = await client.getMailboxLock('INBOX');
+    try {
+      const total = (client.mailbox as any)?.exists || 0;
+      const start = Math.max(1, total - limit + 1);
+      for await (const msg of client.fetch(`${start}:*`, { source: true })) {
+        try {
+          const parsed = await simpleParser((msg as any).source);
+          emails.push({
+            from: parsed.from?.text || '',
+            subject: parsed.subject || '',
+            text: parsed.text || '',
+            date: parsed.date || new Date(),
+            uid: (msg as any).uid,
+          });
+        } catch (e) { /* skip bad email */ }
+      }
+    } finally {
+      lock.release();
+    }
+    await client.logout();
+  } catch (err: any) {
+    try { await client.logout(); } catch {}
+    throw err;
+  }
+
+  return emails.reverse();
+}
+
+async function testGmailImapConnection() {
+  const start = Date.now();
+  const config = getGmailConfig();
+
+  if (!isGmailConfigured()) {
+    return {
+      success: false,
+      message: 'Gmail not configured. Set GMAIL_USER and GMAIL_APP_PASSWORD.',
+      durationMs: Date.now() - start,
+    };
+  }
+
+  const client = new ImapFlow({
+    host: config.host,
+    port: config.port,
+    secure: true,
+    auth: { user: config.user, pass: config.appPassword },
+    logger: false,
+  } as any);
+
+  try {
+    await client.connect();
+    const lock = await client.getMailboxLock('INBOX');
+    const exists = (client.mailbox as any)?.exists || 0;
+    lock.release();
+    await client.logout();
+    return {
+      success: true,
+      message: `Connected to ${config.user}. INBOX has ${exists} messages.`,
+      durationMs: Date.now() - start,
+    };
+  } catch (err: any) {
+    try { await client.logout(); } catch {}
+    return {
+      success: false,
+      message: 'IMAP connection failed',
+      error: err.message,
+      durationMs: Date.now() - start,
+    };
+  }
+}
+
+async function runPaymentVerificationScan(limit: number = 20) {
+  const start = Date.now();
+  const details: any[] = [];
+  let ordersVerifiedCount = 0;
+  let ordersNeedsReviewCount = 0;
+  let duplicatesRejectedCount = 0;
+
+  try {
+    if (!isGmailConfigured()) {
+      return {
+        success: false,
+        scannedEmailsCount: 0,
+        ordersVerifiedCount: 0,
+        ordersNeedsReviewCount: 0,
+        duplicatesRejectedCount: 0,
+        details: [],
+        durationMs: Date.now() - start,
+        error: 'Gmail not configured',
+      };
+    }
+
+    const emails = await fetchRecentEmails(limit);
+
+    const thirtyMinAgo = new Date(Date.now() - 30 * 60 * 1000);
+    const pendingOrders = await OrderModel.find({
+      status: 'pending',
+      createdAt: { $gte: thirtyMinAgo },
+    }).sort({ createdAt: -1 });
+
+    const usedUtrs = new Set(
+      (await OrderModel.find({ matchedUtr: { $exists: true, $ne: '' } }).lean())
+        .map((o: any) => o.matchedUtr)
+        .filter(Boolean)
+    );
+
+    for (const email of emails) {
+      const parsed = parseFamAppEmail(email.from, email.subject, email.text);
+
+      if (!parsed.isValid || !parsed.amount) {
+        details.push({ emailSubject: email.subject, status: 'skipped', reason: parsed.detectionReason || 'Invalid' });
+        continue;
+      }
+
+      if (parsed.utr && usedUtrs.has(parsed.utr)) {
+        duplicatesRejectedCount++;
+        details.push({ emailSubject: email.subject, status: 'duplicate', reason: `UTR ${parsed.utr} reused` });
+        continue;
+      }
+
+      let matchedOrder: any = null;
+      for (const order of pendingOrders) {
+        if (Math.abs(order.payableAmount - parsed.amount) < 0.01) {
+          matchedOrder = order;
+          break;
+        }
+      }
+
+      if (!matchedOrder) {
+        ordersNeedsReviewCount++;
+        details.push({ emailSubject: email.subject, status: 'no_match', amount: parsed.amount, utr: parsed.utr });
+        continue;
+      }
+
+      matchedOrder.status = 'verified';
+      matchedOrder.verifiedAt = new Date();
+      matchedOrder.matchedUtr = parsed.utr || 'AUTO-VERIFIED';
+      matchedOrder.maskedUtr = matchedOrder.matchedUtr.slice(0, 4) + '****' + matchedOrder.matchedUtr.slice(-4);
+      matchedOrder.fampayTxnId = parsed.fampayTxnId || '';
+      matchedOrder.matchedAmountRupees = parsed.amount;
+      matchedOrder.matchedAmountPaise = Math.round(parsed.amount * 100);
+      matchedOrder.verificationReason = `Auto-verified via FamApp email`;
+
+      if (!matchedOrder.telegramInviteLink) {
+        const movie = await MovieModel.findOne({ id: matchedOrder.movieId }).lean();
+        if (movie?.telegramChannelId) {
+          const link = await generateTelegramInviteLink(movie.telegramChannelId, matchedOrder.orderId);
+          if (link) {
+            matchedOrder.telegramInviteLink = link;
+            matchedOrder.telegramInviteGeneratedAt = new Date();
+          }
+        }
+      }
+
+      await matchedOrder.save();
+      if (parsed.utr) usedUtrs.add(parsed.utr);
+      ordersVerifiedCount++;
+      details.push({ emailSubject: email.subject, status: 'verified', orderId: matchedOrder.orderId, amount: parsed.amount });
+    }
+
+    return {
+      success: true,
+      scannedEmailsCount: emails.length,
+      ordersVerifiedCount,
+      ordersNeedsReviewCount,
+      duplicatesRejectedCount,
+      details,
+      durationMs: Date.now() - start,
+    };
+  } catch (err: any) {
+    console.error('[PAYMENT SCAN ERROR]', err.message);
+    return {
+      success: false,
+      scannedEmailsCount: 0,
+      ordersVerifiedCount,
+      ordersNeedsReviewCount,
+      duplicatesRejectedCount,
+      details,
+      durationMs: Date.now() - start,
+      error: err.message,
+    };
+  }
+}
+
+// ============================================================
 // HEALTH
 // ============================================================
 app.get('/api/health', (_req, res) => {
@@ -250,6 +532,9 @@ app.get('/api/health', (_req, res) => {
     },
     telegram: {
       botConfigured: !!process.env.TELEGRAM_BOT_TOKEN,
+    },
+    gmail: {
+      configured: isGmailConfigured(),
     },
     timestamp: new Date().toISOString(),
   });
@@ -331,7 +616,6 @@ app.post('/api/orders/create', async (req, res) => {
     const amountStr = payableAmount.toFixed(2);
     const upiString = `upi://pay?pa=${encodeURIComponent(upiVpa)}&pn=${encodeURIComponent(payeeName)}&am=${amountStr}&cu=INR&tn=${encodeURIComponent(orderId)}`;
 
-    // Pre-generate Telegram one-time invite link (if channel configured)
     let telegramInviteLink: string | undefined;
     if (movie.telegramChannelId) {
       const link = await generateTelegramInviteLink(movie.telegramChannelId, orderId);
@@ -382,7 +666,6 @@ app.get('/api/orders/:orderId', async (req, res) => {
     orderObj.upiPaymentUri = orderObj.upiPaymentUri || orderObj.qrString;
     orderObj.upiPayeeName = orderObj.upiPayeeName || orderObj.payeeName;
 
-    // Only expose Telegram link if order is verified
     if (orderObj.status !== 'verified') {
       delete orderObj.telegramInviteLink;
     }
@@ -690,7 +973,7 @@ app.get('/api/admin/orders', requireAdmin, async (_req, res) => {
   }
 });
 
-// ADMIN: Manual verify an order (for testing / manual approval)
+// ADMIN: Manual verify an order
 app.post('/api/admin/orders/:orderId/verify-manual', requireAdmin, async (req, res) => {
   try {
     await connectDB();
@@ -704,7 +987,6 @@ app.post('/api/admin/orders/:orderId/verify-manual', requireAdmin, async (req, r
     order.matchedUtr = req.body?.utr || 'MANUAL-ADMIN';
     order.maskedUtr = order.matchedUtr.slice(0, 4) + '****' + order.matchedUtr.slice(-4);
 
-    // If no telegram link yet, generate now
     if (!order.telegramInviteLink) {
       const movie = await MovieModel.findOne({ id: order.movieId }).lean();
       if (movie?.telegramChannelId) {
@@ -782,17 +1064,26 @@ app.post('/api/admin/orders/:orderId/generate-telegram-link', requireAdmin, asyn
   }
 });
 
-// Auto payment verification (Gmail IMAP) — kept as stub
-app.post('/api/admin/orders/verify-payments', requireAdmin, async (_req, res) => {
-  res.json({
-    success: true,
-    scannedEmailsCount: 0,
-    ordersVerifiedCount: 0,
-    ordersNeedsReviewCount: 0,
-    duplicatesRejectedCount: 0,
-    details: [],
-    durationMs: 0,
-  });
+// ============================================================
+// AUTO PAYMENT VERIFICATION (Gmail IMAP + FamApp)
+// ============================================================
+app.post('/api/admin/orders/verify-payments', requireAdmin, async (req, res) => {
+  try {
+    const limit = parseInt(req.body?.limit || '20', 10);
+    const result = await runPaymentVerificationScan(limit);
+    res.json(result);
+  } catch (err: any) {
+    res.status(500).json({
+      success: false,
+      error: err.message,
+      scannedEmailsCount: 0,
+      ordersVerifiedCount: 0,
+      ordersNeedsReviewCount: 0,
+      duplicatesRejectedCount: 0,
+      details: [],
+      durationMs: 0,
+    });
+  }
 });
 
 // ============================================================
@@ -842,22 +1133,80 @@ app.put('/api/admin/upi-config', requireAdmin, async (req, res) => {
 });
 
 // ============================================================
-// GMAIL STUBS (kept as-is)
+// GMAIL ROUTES (REAL — using IMAP)
 // ============================================================
 app.get('/api/admin/gmail/status', requireAdmin, (_req, res) => {
+  const config = getGmailConfig();
   res.json({
-    configured: false,
-    verifiedSender: process.env.GMAIL_VERIFIED_SENDER || null,
-    message: 'Gmail IMAP integration not configured in this deployment.',
+    configured: isGmailConfigured(),
+    user: config.user ? config.user.slice(0, 3) + '***@' + config.user.split('@')[1] : null,
+    host: config.host,
+    port: config.port,
+    verifiedSender: config.verifiedSender,
+    message: isGmailConfigured() ? 'Gmail IMAP configured.' : 'Set GMAIL_USER and GMAIL_APP_PASSWORD.',
   });
 });
 
-app.post('/api/admin/gmail/test-connection', requireAdmin, (_req, res) => {
-  res.json({
-    success: false,
-    message: 'Gmail IMAP not available in this deployment.',
-    durationMs: 0,
-  });
+app.post('/api/admin/gmail/test-connection', requireAdmin, async (_req, res) => {
+  try {
+    const result = await testGmailImapConnection();
+    res.json(result);
+  } catch (err: any) {
+    res.status(500).json({
+      success: false,
+      message: 'Unexpected error',
+      error: err.message,
+      durationMs: 0,
+    });
+  }
+});
+
+// Fetch recent emails (safe — no body, just headers)
+app.get('/api/admin/gmail/recent-alerts', requireAdmin, async (req, res) => {
+  try {
+    const limit = parseInt((req.query.limit as string) || '10', 10);
+
+    if (!isGmailConfigured()) {
+      return res.json({
+        success: false,
+        count: 0,
+        emails: [],
+        error: 'Gmail not configured',
+      });
+    }
+
+    const emails = await fetchRecentEmails(limit);
+    const summaries = emails.map((e: any) => ({
+      from: e.from,
+      subject: e.subject,
+      date: e.date,
+      preview: (e.text || '').slice(0, 120),
+    }));
+
+    res.json({ success: true, count: summaries.length, emails: summaries });
+  } catch (err: any) {
+    res.status(500).json({
+      success: false,
+      count: 0,
+      emails: [],
+      error: err.message,
+    });
+  }
+});
+
+// Diagnostic parser (test email parsing)
+app.post('/api/admin/gmail/diagnose-parser', requireAdmin, (req, res) => {
+  try {
+    const { from, subject, text } = req.body || {};
+    if (!from && !subject && !text) {
+      return res.status(400).json({ error: 'Provide at least one field: from, subject, or text' });
+    }
+
+    const result = parseFamAppEmail(from || '', subject || '', text || '');
+    res.json({ success: true, result });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
 });
 
 // ============================================================
