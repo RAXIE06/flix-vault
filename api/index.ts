@@ -762,6 +762,43 @@ app.get('/api/orders/:orderId', async (req, res) => {
 });
 
 // ============================================================
+// ORDER RECOVERY — Find orders by Order IDs (for user recovery)
+// ============================================================
+app.post('/api/orders/recover', async (req, res) => {
+  try {
+    await connectDB();
+    const { orderIds } = req.body || {};
+
+    if (!Array.isArray(orderIds) || orderIds.length === 0) {
+      return res.status(400).json({ error: 'orderIds array is required' });
+    }
+
+    // Limit to prevent abuse
+    const limitedIds = orderIds.slice(0, 20);
+
+    const orders = await OrderModel.find({
+      orderId: { $in: limitedIds },
+    }).lean();
+
+    // Sanitize: expose telegram link only for verified orders
+    const sanitized = orders.map((o: any) => {
+      const obj: any = { ...o };
+      obj.upiPaymentUri = obj.upiPaymentUri || obj.qrString;
+      obj.upiPayeeName = obj.upiPayeeName || obj.payeeName;
+      if (obj.status !== 'verified') {
+        delete obj.telegramInviteLink;
+      }
+      return obj;
+    });
+
+    res.json({ success: true, orders: sanitized, count: sanitized.length });
+  } catch (err: any) {
+    console.error('[ORDER RECOVER] Error:', err.message);
+    res.status(500).json({ error: 'Failed to recover orders' });
+  }
+});
+
+// ============================================================
 // EXTERNAL CRON ENDPOINT — Auto Verify (from cron-job.org)
 // ============================================================
 app.all('/api/cron/verify-payments', async (req, res) => {
