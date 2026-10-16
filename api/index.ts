@@ -1,4 +1,4 @@
-// api/index.ts — Full Backend (MongoDB + Telegram + Gmail IMAP + Auto-Verify)
+// api/index.ts — Full Backend (MongoDB + Telegram + Gmail IMAP + Auto-Verify + Cron)
 import express from 'express';
 import cookieParser from 'cookie-parser';
 import dotenv from 'dotenv';
@@ -155,7 +155,6 @@ const OrderSchema = new mongoose.Schema({
 
 const OrderModel = mongoose.models.Order || mongoose.model('Order', OrderSchema);
 
-// Poster storage in GridFS
 let gridfsBucket: any = null;
 function getBucket() {
   if (!gridfsBucket) {
@@ -431,6 +430,9 @@ async function runPaymentVerificationScan(limit: number = 20) {
   let duplicatesRejectedCount = 0;
 
   try {
+    // 🔥 CRITICAL: Ensure DB is connected before querying
+    await connectDB();
+
     if (!isGmailConfigured()) {
       return {
         success: false,
@@ -549,6 +551,7 @@ function triggerBackgroundVerify() {
   }
   lastGlobalScan = now;
 
+  // 🔥 connectDB() is called inside runPaymentVerificationScan now
   runPaymentVerificationScan(30)
     .then((result) => {
       if (result.ordersVerifiedCount > 0) {
@@ -753,6 +756,7 @@ app.all('/api/cron/verify-payments', async (req, res) => {
 
   try {
     console.log('[CRON] Triggered by external service');
+    // runPaymentVerificationScan now awaits connectDB() internally
     const result = await runPaymentVerificationScan(30);
     res.json({
       success: true,
@@ -902,7 +906,7 @@ app.patch('/api/admin/movies/:id/toggle', requireAdmin, async (req, res) => {
 });
 
 // ============================================================
-// POSTER UPLOAD (Base64) — Auto-creates movie if not found
+// POSTER UPLOAD
 // ============================================================
 app.post('/api/admin/movies/:id/poster', requireAdmin, async (req, res) => {
   try {
@@ -1160,7 +1164,7 @@ app.post('/api/admin/orders/:orderId/generate-telegram-link', requireAdmin, asyn
 });
 
 // ============================================================
-// AUTO PAYMENT VERIFICATION (Manual trigger from admin panel)
+// MANUAL PAYMENT VERIFICATION (from admin panel button)
 // ============================================================
 app.post('/api/admin/orders/verify-payments', requireAdmin, async (req, res) => {
   try {
