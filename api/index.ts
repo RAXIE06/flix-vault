@@ -1189,6 +1189,82 @@ app.post('/api/admin/orders/:orderId/generate-telegram-link', requireAdmin, asyn
 });
 
 // ============================================================
+// ADMIN ANALYTICS — Per Movie Sales + Earnings
+// ============================================================
+app.get('/api/admin/analytics', requireAdmin, async (_req, res) => {
+  try {
+    await connectDB();
+
+    // Fetch all orders
+    const allOrders = await OrderModel.find({}).lean();
+
+    // Group by movieId
+    const movieMap: Record<string, any> = {};
+
+    for (const order of allOrders) {
+      const mId = order.movieId || 'unknown';
+      if (!movieMap[mId]) {
+        movieMap[mId] = {
+          movieId: mId,
+          movieTitle: order.movieTitle || 'Unknown',
+          totalOrders: 0,
+          verifiedOrders: 0,
+          pendingOrders: 0,
+          expiredOrders: 0,
+          totalRevenue: 0,
+          uniqueBuyers: new Set<string>(),
+        };
+      }
+
+      movieMap[mId].totalOrders++;
+
+      if (order.status === 'verified') {
+        movieMap[mId].verifiedOrders++;
+        movieMap[mId].totalRevenue += Number(order.payableAmount) || 0;
+        if (order.matchedUtr) {
+          movieMap[mId].uniqueBuyers.add(order.matchedUtr);
+        }
+      } else if (order.status === 'pending') {
+        movieMap[mId].pendingOrders++;
+      } else if (order.status === 'expired') {
+        movieMap[mId].expiredOrders++;
+      }
+    }
+
+    // Convert Sets to numbers
+    const perMovie = Object.values(movieMap).map((m: any) => ({
+      movieId: m.movieId,
+      movieTitle: m.movieTitle,
+      totalOrders: m.totalOrders,
+      verifiedOrders: m.verifiedOrders,
+      pendingOrders: m.pendingOrders,
+      expiredOrders: m.expiredOrders,
+      totalRevenue: Math.round(m.totalRevenue * 100) / 100,
+      uniqueBuyers: m.uniqueBuyers.size,
+    }));
+
+    // Sort by revenue descending
+    perMovie.sort((a: any, b: any) => b.totalRevenue - a.totalRevenue);
+
+    // Global totals
+    const summary = {
+      totalRevenue: perMovie.reduce((sum: number, m: any) => sum + m.totalRevenue, 0),
+      totalOrders: allOrders.length,
+      totalVerifiedOrders: allOrders.filter((o: any) => o.status === 'verified').length,
+      totalPendingOrders: allOrders.filter((o: any) => o.status === 'pending').length,
+      totalExpiredOrders: allOrders.filter((o: any) => o.status === 'expired').length,
+      perMovie,
+      lastUpdated: new Date().toISOString(),
+    };
+
+    res.json({ success: true, ...summary });
+  } catch (err: any) {
+    console.error('[ANALYTICS] Error:', err.message);
+    res.status(500).json({ error: 'Failed to load analytics' });
+  }
+});
+
+// ============================================================
 // MANUAL PAYMENT VERIFICATION (from admin panel button)
 // ============================================================
 app.post('/api/admin/orders/verify-payments', requireAdmin, async (req, res) => {
