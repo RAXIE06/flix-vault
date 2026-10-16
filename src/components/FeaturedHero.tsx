@@ -29,7 +29,7 @@ export const FeaturedHero: React.FC<FeaturedHeroProps> = ({
             
             {/* Featured Artwork */}
             <div className="md:col-span-5 relative w-full overflow-hidden bg-black/60">
-              <div className="relative w-full aspect-[16/11] sm:aspect-[4/3] md:aspect-[3/4] overflow-hidden">
+              <div className="relative w-full aspect-[4/5] sm:aspect-[4/3] md:aspect-[3/4] overflow-hidden">
                 <MoviePosterArt
                   movie={movie}
                   variant="poster"
