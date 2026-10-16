@@ -12,7 +12,7 @@ export const CURATED_SHOWCASE_MOVIES: Movie[] = [
     year: 2025,
     genres: ['Sci-Fi', 'Mystery'],
     duration: '2h 28m',
-    rating: 'PG-13',
+    rating: 'U/A 13+',
     director: 'Elena Vance',
     cast: ['Alexander Cross', 'Nadia Chen', 'Marcus Sterling'],
     synopsis: 'A deep-space salvage crew discovers a derelict exploration vessel hovering at the event horizon of an ancient singularity, where temporal distortions begin physically rewriting their reality.',
@@ -23,8 +23,10 @@ export const CURATED_SHOWCASE_MOVIES: Movie[] = [
     accessLabel: 'Pay per Movie · ₹149',
     resolution: '4K IMAX',
     audio: 'Dolby Atmos',
-    isFeatured: true, // Selected featured movie
-    isEnabled: true,  // Published on storefront
+    languages: ['Hindi', 'English', 'Tamil'],
+    posterAspectRatio: '2:3',
+    isFeatured: true,
+    isEnabled: true,
     telegramChannelId: '@flixvault_vip_chronos',
     artwork: {
       bgGradient: 'from-violet-950 via-purple-900 to-black',
@@ -39,7 +41,7 @@ export const CURATED_SHOWCASE_MOVIES: Movie[] = [
     year: 2026,
     genres: ['Cyberpunk', 'Action'],
     duration: '1h 56m',
-    rating: 'R',
+    rating: 'A',
     director: 'Kaito Takahashi',
     cast: ['Ren Yamato', 'Sora Morales', 'Evelyn Gray'],
     synopsis: 'In a rain-slicked mega-metropolis governed by automated corporate cartels, an ex-enforcer with compromised neural augments accepts one final extraction contract.',
@@ -50,6 +52,8 @@ export const CURATED_SHOWCASE_MOVIES: Movie[] = [
     accessLabel: 'Pay per Movie · ₹129',
     resolution: '4K HDR',
     audio: 'Dolby Atmos',
+    languages: ['Hindi', 'English', 'Telugu'],
+    posterAspectRatio: '2:3',
     isFeatured: false,
     isEnabled: true,
     telegramChannelId: '@flixvault_vip_neon',
@@ -66,7 +70,7 @@ export const CURATED_SHOWCASE_MOVIES: Movie[] = [
     year: 2024,
     genres: ['Noir', 'Thriller'],
     duration: '2h 12m',
-    rating: 'R',
+    rating: 'U/A 16+',
     director: 'Julian Moreau',
     cast: ['Vincent Thorne', 'Camille Laurent', 'Oscar Vance'],
     synopsis: 'A retired cryptanalyst in 1950s Geneva is pulled into a clandestine shadow operation when a coded journal belonging to a disappeared diplomat surfaces at an estate auction.',
@@ -77,6 +81,8 @@ export const CURATED_SHOWCASE_MOVIES: Movie[] = [
     accessLabel: 'Pay per Movie · ₹99',
     resolution: '4K HDR',
     audio: '5.1 Surround',
+    languages: ['Hindi', 'English'],
+    posterAspectRatio: '2:3',
     isFeatured: false,
     isEnabled: true,
     telegramChannelId: '@flixvault_vip_cipher',
@@ -89,7 +95,6 @@ export const CURATED_SHOWCASE_MOVIES: Movie[] = [
   },
 ];
 
-// Additional titles available for 4–5 movie showcase configurations
 export const ADDITIONAL_AVAILABLE_MOVIES: Movie[] = [
   {
     id: 'mv-004',
@@ -97,7 +102,7 @@ export const ADDITIONAL_AVAILABLE_MOVIES: Movie[] = [
     year: 2026,
     genres: ['Sci-Fi', 'Drama'],
     duration: '2h 35m',
-    rating: 'PG-13',
+    rating: 'U/A 13+',
     director: 'David O’Connor',
     cast: ['Jonathan Hayes', 'Maya Lin', 'David Kaluuya'],
     synopsis: 'During mankind’s maiden mission to an anomalous radiation belt around Jupiter, an AI navigator begins questioning the psychological validity of the crew’s sensory recollections.',
@@ -108,6 +113,8 @@ export const ADDITIONAL_AVAILABLE_MOVIES: Movie[] = [
     accessLabel: 'Pay per Movie · ₹199',
     resolution: '4K IMAX',
     audio: 'Dolby Atmos',
+    languages: ['Hindi', 'English'],
+    posterAspectRatio: '2:3',
     isFeatured: false,
     isEnabled: true,
     telegramChannelId: '@flixvault_vip_solaris',
@@ -124,7 +131,7 @@ export const ADDITIONAL_AVAILABLE_MOVIES: Movie[] = [
     year: 2025,
     genres: ['Sci-Fi', 'Thriller'],
     duration: '2h 04m',
-    rating: 'PG-13',
+    rating: 'U/A 13+',
     director: 'Astrid Lindholm',
     cast: ['Maren Solberg', 'Tariq Al-Mansoor', 'Claire Dubois'],
     synopsis: 'Stationed seven miles beneath the Atlantic trench, researchers at an abyssal thermal facility detect seismic harmonic sequences responding directly to human radio transmissions.',
@@ -135,6 +142,8 @@ export const ADDITIONAL_AVAILABLE_MOVIES: Movie[] = [
     accessLabel: 'Pay per Movie · ₹149',
     resolution: '4K HDR',
     audio: 'Dolby Atmos',
+    languages: ['Hindi', 'English', 'Malayalam'],
+    posterAspectRatio: '2:3',
     isFeatured: false,
     isEnabled: true,
     telegramChannelId: '@flixvault_vip_abyss',
@@ -147,15 +156,16 @@ export const ADDITIONAL_AVAILABLE_MOVIES: Movie[] = [
   },
 ];
 
-// Combine all for catalog
 export const ALL_MOVIES_CATALOG: Movie[] = [
   ...CURATED_SHOWCASE_MOVIES,
   ...ADDITIONAL_AVAILABLE_MOVIES,
 ];
 
-// Export alias for backward compatibility
 export const SAMPLE_MOVIES = ALL_MOVIES_CATALOG;
 
+// ============================================================
+// GENRES
+// ============================================================
 export const GENRES = [
   'All',
   'Sci-Fi',
@@ -167,6 +177,37 @@ export const GENRES = [
   'Mystery',
 ] as const;
 
+// ============================================================
+// LANGUAGES (Batch 2 addition)
+// ============================================================
+export const AVAILABLE_LANGUAGES = [
+  'Hindi',
+  'English',
+  'Tamil',
+  'Telugu',
+  'Malayalam',
+  'Kannada',
+  'Bengali',
+  'Marathi',
+  'Punjabi',
+  'Gujarati',
+  'Bhojpuri',
+  'Urdu',
+] as const;
+
+// ============================================================
+// POSTER ASPECT RATIOS (Batch 2 addition)
+// ============================================================
+export const AVAILABLE_ASPECT_RATIOS = [
+  { value: '2:3', label: '2:3 — Classic Movie Poster (Vertical)' },
+  { value: '16:9', label: '16:9 — Cinematic Widescreen' },
+  { value: '1:1', label: '1:1 — Square (Instagram Style)' },
+  { value: '4:5', label: '4:5 — Portrait (Mobile Optimized)' },
+] as const;
+
+// ============================================================
+// TELEGRAM CONFIG
+// ============================================================
 export const INITIAL_TELEGRAM_CONFIG: TelegramConfig = {
   botUsername: '@FlixVaultDeliveryBot',
   botConfigured: false,
@@ -175,7 +216,9 @@ export const INITIAL_TELEGRAM_CONFIG: TelegramConfig = {
   adminNotes: 'Telegram bot token and private channel webhook verification will be configured via server environment variables (.env) in Phase 3. Tokens are never exposed in the browser.',
 };
 
-// Helper to determine the single primary featured movie from active/enabled movies
+// ============================================================
+// HELPERS
+// ============================================================
 export function resolveFeaturedMovie(movies: Movie[]): Movie | null {
   if (!movies || movies.length === 0) return null;
   const active = movies.filter((m) => m.isEnabled !== false);
@@ -184,7 +227,6 @@ export function resolveFeaturedMovie(movies: Movie[]): Movie | null {
   return explicitlyFeatured || active[0];
 }
 
-// Helper to get secondary movies (excluding the primary featured movie, only enabled)
 export function resolveSecondaryMovies(movies: Movie[], featuredMovieId?: string): Movie[] {
   if (!movies || movies.length <= 1) return [];
   const active = movies.filter((m) => m.isEnabled !== false);
