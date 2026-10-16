@@ -13,9 +13,10 @@ import {
   AlertCircle,
   Send,
   Clock,
+  Smartphone,
 } from 'lucide-react';
 import QRCode from 'qrcode';
-import { Movie, UpiPaymentOrder } from '../types';
+import { Movie, UpiPaymentOrder, UserOrderRecord } from '../types';
 import { api } from '../services/api';
 
 interface PurchaseModalProps {
@@ -23,7 +24,37 @@ interface PurchaseModalProps {
   onClose: () => void;
 }
 
-const VERIFY_MAX_SECONDS = 120; // 2 minutes
+const VERIFY_MAX_SECONDS = 120;
+const RECOVERY_STORAGE_KEY = 'flixvault_my_orders';
+
+/**
+ * Save/Update order in localStorage for recovery after browser refresh.
+ */
+function saveOrderToLocalStorage(order: UpiPaymentOrder) {
+  try {
+    const raw = localStorage.getItem(RECOVERY_STORAGE_KEY);
+    const existing: UserOrderRecord[] = raw ? JSON.parse(raw) : [];
+
+    const record: UserOrderRecord = {
+      orderId: order.orderId,
+      movieId: order.movieId,
+      movieTitle: order.movieTitle,
+      payableAmount: order.payableAmount,
+      status: order.status,
+      telegramInviteLink: order.telegramInviteLink,
+      verifiedAt: order.verifiedAt,
+      createdAt: order.createdAt,
+      savedAt: Date.now(),
+    };
+
+    const filtered = existing.filter((o) => o.orderId !== order.orderId);
+    const updated = [record, ...filtered].slice(0, 20); // keep last 20
+
+    localStorage.setItem(RECOVERY_STORAGE_KEY, JSON.stringify(updated));
+  } catch (e) {
+    console.warn('[localStorage] Failed to save order:', e);
+  }
+}
 
 export const PurchaseModal: React.FC<PurchaseModalProps> = ({ movie, onClose }) => {
   const [order, setOrder] = useState<UpiPaymentOrder | null>(null);
@@ -35,6 +66,7 @@ export const PurchaseModal: React.FC<PurchaseModalProps> = ({ movie, onClose }) 
   const [copiedUri, setCopiedUri] = useState(false);
   const [showDiagnostics, setShowDiagnostics] = useState(false);
   const [secondsElapsed, setSecondsElapsed] = useState(0);
+  const [upiPhoneHint, setUpiPhoneHint] = useState<string | null>(null);
 
   // Initial order creation
   useEffect(() => {
@@ -56,6 +88,7 @@ export const PurchaseModal: React.FC<PurchaseModalProps> = ({ movie, onClose }) 
 
         if (!isMounted) return;
         setOrder(res.order);
+        saveOrderToLocalStorage(res.order);
 
         const qrUrl = await QRCode.toDataURL(res.order.upiPaymentUri, {
           width: 320,
@@ -83,7 +116,7 @@ export const PurchaseModal: React.FC<PurchaseModalProps> = ({ movie, onClose }) 
     };
   }, [movie]);
 
-  // Auto-poll order status every 8 seconds to detect verification
+  // Auto-poll order status every 8 seconds
   useEffect(() => {
     if (!order || order.status === 'verified' || order.status === 'expired') return;
 
@@ -97,6 +130,7 @@ export const PurchaseModal: React.FC<PurchaseModalProps> = ({ movie, onClose }) 
 
         if (updated.status !== order.status) {
           setOrder(updated);
+          saveOrderToLocalStorage(updated);
         }
       } catch (err) {
         // Silent fail
@@ -106,9 +140,7 @@ export const PurchaseModal: React.FC<PurchaseModalProps> = ({ movie, onClose }) 
     return () => clearInterval(interval);
   }, [order]);
 
-  // ============================================================
-  // TIMER — counts seconds elapsed since order creation
-  // ============================================================
+  // Live verification timer
   useEffect(() => {
     if (!order || order.status !== 'pending') return;
 
@@ -124,7 +156,7 @@ export const PurchaseModal: React.FC<PurchaseModalProps> = ({ movie, onClose }) 
     return () => clearInterval(interval);
   }, [order]);
 
-  // ESC key handler
+  // ESC handler
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
       if (e.key === 'Escape') onClose();
@@ -156,6 +188,51 @@ export const PurchaseModal: React.FC<PurchaseModalProps> = ({ movie, onClose }) 
       navigator.clipboard.writeText(order.upiPaymentUri);
       setCopiedUri(true);
       setTimeout(() => setCopiedUri(false), 2000);
+    }
+  };
+
+  // ============================================================
+  // UPI DEEP LINK HANDLER (Batch 3 fix)
+  // ============================================================
+  const handleOpenUpiApp = () => {
+    if (!order) return;
+
+    const isMobile = /Android|iPhone|iPad|iPod|Mobile/i.test(navigator.userAgent);
+
+    if (!isMobile) {
+      setUpiPhoneHint(
+        'Please scan the QR code above with your phone. UPI app deep links work only on mobile.'
+      );
+      setTimeout(() => setUpiPhoneHint(null), 5000);
+      return;
+    }
+
+    // Build a clean, standards-compliant UPI URI
+    // Only replace space (not @) in payee name — critical for GPay/PhonePe compatibility
+    const cleanPayeeName = (order.upiPayeeName || 'FlixVault').replace(/\s+/g, '_');
+    const cleanVpa = order.upiVpa;
+    const cleanAmount = order.payableAmount.toFixed(2);
+    const cleanOrderId = order.orderId.replace(/[^A-Za-z0-9-]/g, '');
+
+    const uri = `upi://pay?pa=${encodeURIComponent(cleanVpa)}&pn=${encodeURIComponent(
+      cleanPayeeName
+    )}&am=${cleanAmount}&cu=INR&tn=${encodeURIComponent(cleanOrderId)}`;
+
+    // Try multiple fallback strategies
+    try {
+      // Primary: direct navigation (works best on Android Chrome/Safari)
+      window.location.href = uri;
+
+      // Fallback: if app doesn't open in 2.5s, show hint
+      setTimeout(() => {
+        setUpiPhoneHint(
+          'If your UPI app did not open, please scan the QR code above — that always works.'
+        );
+        setTimeout(() => setUpiPhoneHint(null), 6000);
+      }, 2500);
+    } catch (err) {
+      setUpiPhoneHint('Could not open UPI app. Please use the QR code.');
+      setTimeout(() => setUpiPhoneHint(null), 6000);
     }
   };
 
@@ -239,7 +316,7 @@ export const PurchaseModal: React.FC<PurchaseModalProps> = ({ movie, onClose }) 
         {order && !loading && (
           <div className="space-y-4">
 
-            {/* ✅ VERIFIED STATE — Show Telegram Link */}
+            {/* VERIFIED STATE — Telegram Link */}
             {order.status === 'verified' && order.telegramInviteLink && (
               <div className="p-4 rounded-xl bg-gradient-to-br from-emerald-950/60 to-purple-950/40 border-2 border-emerald-600/70 space-y-3">
                 <div className="flex items-center gap-2 text-emerald-300 font-bold text-base">
@@ -249,7 +326,7 @@ export const PurchaseModal: React.FC<PurchaseModalProps> = ({ movie, onClose }) 
 
                 <p className="text-xs text-emerald-200/90 leading-relaxed">
                   Thank you! Your payment of <strong className="text-white">₹{order.payableAmount.toFixed(2)}</strong> has been verified.
-                  Click below to join your exclusive Telegram channel and start watching.
+                  Click below to join your exclusive Telegram channel.
                 </p>
 
                 <a
@@ -269,7 +346,7 @@ export const PurchaseModal: React.FC<PurchaseModalProps> = ({ movie, onClose }) 
               </div>
             )}
 
-            {/* PENDING STATE — Show QR */}
+            {/* PENDING STATE — QR */}
             {order.status !== 'verified' && (
               <>
                 <div className="p-3 rounded-xl bg-[#130d22] border border-purple-950/60 flex items-center justify-between text-xs">
@@ -331,19 +408,32 @@ export const PurchaseModal: React.FC<PurchaseModalProps> = ({ movie, onClose }) 
                     </button>
                   </div>
 
+                  {/* ============================================================ */}
+                  {/* UPI DEEP LINK BUTTON (Batch 3 fixed)                         */}
+                  {/* ============================================================ */}
                   <div className="w-full pt-3">
-                    <a
-                      href={order.upiPaymentUri}
-                      className="w-full min-h-[46px] py-2.5 px-4 rounded-xl bg-gradient-to-r from-purple-600 to-violet-700 hover:from-purple-500 hover:to-violet-600 text-white font-bold text-xs sm:text-sm shadow-md shadow-purple-950 transition-all flex items-center justify-center gap-2"
+                    <button
+                      type="button"
+                      onClick={handleOpenUpiApp}
+                      className="w-full min-h-[46px] py-2.5 px-4 rounded-xl bg-gradient-to-r from-purple-600 to-violet-700 hover:from-purple-500 hover:to-violet-600 text-white font-bold text-xs sm:text-sm shadow-md shadow-purple-950 transition-all flex items-center justify-center gap-2 cursor-pointer active:scale-[0.98]"
                     >
+                      <Smartphone className="w-4 h-4" />
                       <span>Pay via UPI App</span>
                       <ExternalLink className="w-4 h-4" />
-                    </a>
+                    </button>
                   </div>
 
-                  {/* ============================================================ */}
-                  {/* LIVE VERIFICATION TIMER (2 minutes countdown)               */}
-                  {/* ============================================================ */}
+                  {upiPhoneHint && (
+                    <div className="w-full mt-2 p-2.5 rounded-lg bg-amber-950/50 border border-amber-800/60 text-[11px] text-amber-200 text-left leading-relaxed">
+                      {upiPhoneHint}
+                    </div>
+                  )}
+
+                  <p className="text-[10px] text-zinc-500 mt-2 text-center">
+                    📱 On mobile? Deep link works. On desktop? Use the QR code above.
+                  </p>
+
+                  {/* LIVE VERIFICATION TIMER */}
                   <div
                     className={`w-full mt-3 p-3.5 rounded-xl border space-y-2 transition-all ${
                       isTimedOut
@@ -415,7 +505,7 @@ export const PurchaseModal: React.FC<PurchaseModalProps> = ({ movie, onClose }) 
               </>
             )}
 
-            {/* Order verified but no telegram link yet */}
+            {/* Verified but no telegram link yet */}
             {order.status === 'verified' && !order.telegramInviteLink && (
               <div className="p-4 rounded-xl bg-purple-950/40 border border-purple-800/60 text-center space-y-2">
                 <Check className="w-8 h-8 text-emerald-400 mx-auto" />
