@@ -164,6 +164,11 @@ export const ALL_MOVIES_CATALOG: Movie[] = [
 export const SAMPLE_MOVIES = ALL_MOVIES_CATALOG;
 
 // ============================================================
+// 🚀 PRODUCTION: Empty fallback — only real MongoDB movies show
+// ============================================================
+export const EMPTY_FALLBACK: Movie[] = [];
+
+// ============================================================
 // GENRES
 // ============================================================
 export const GENRES = [
@@ -178,7 +183,7 @@ export const GENRES = [
 ] as const;
 
 // ============================================================
-// LANGUAGES (Batch 2 addition)
+// LANGUAGES
 // ============================================================
 export const AVAILABLE_LANGUAGES = [
   'Hindi',
@@ -196,7 +201,7 @@ export const AVAILABLE_LANGUAGES = [
 ] as const;
 
 // ============================================================
-// POSTER ASPECT RATIOS (Batch 2 addition)
+// POSTER ASPECT RATIOS
 // ============================================================
 export const AVAILABLE_ASPECT_RATIOS = [
   { value: '2:3', label: '2:3 — Classic Movie Poster (Vertical)' },
