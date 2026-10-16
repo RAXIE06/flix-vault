@@ -17,6 +17,7 @@ import { AdminAccessModal } from './components/AdminAccessModal';
 import { AdminDashboard } from './components/admin/AdminDashboard';
 import { InfoModal } from './components/InfoModal';
 import { Footer } from './components/Footer';
+import { MyOrdersPage } from './components/MyOrdersPage';
 
 const LOCAL_FALLBACK_MOVIES: Movie[] = [
   ...CURATED_SHOWCASE_MOVIES,
@@ -38,6 +39,26 @@ export default function App() {
   const [purchaseMovie, setPurchaseMovie] = useState<Movie | null>(null);
   const [infoModalContent, setInfoModalContent] = useState<InfoModalContent | null>(null);
 
+  // ============================================================
+  // ROUTING — simple hash-based routing for /my-orders
+  // ============================================================
+  const [currentRoute, setCurrentRoute] = useState<string>(() => {
+    return window.location.hash.replace('#', '') || '/';
+  });
+
+  useEffect(() => {
+    const handleHashChange = () => {
+      setCurrentRoute(window.location.hash.replace('#', '') || '/');
+    };
+    window.addEventListener('hashchange', handleHashChange);
+    return () => window.removeEventListener('hashchange', handleHashChange);
+  }, []);
+
+  const navigateTo = useCallback((route: string) => {
+    window.location.hash = route;
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+  }, []);
+
   // Silently try to load from server — fallback to local if fails
   const loadPublicStorefront = useCallback(async () => {
     try {
@@ -54,7 +75,6 @@ export default function App() {
         setDbStatus(healthRes.database);
       }
     } catch (err: any) {
-      // Silent fallback — website still works with local data
       console.warn('[FlixVault] Server unavailable, using local showcase:', err?.message);
       setMovies(LOCAL_FALLBACK_MOVIES);
       setStorageSource('local-sample');
@@ -100,12 +120,24 @@ export default function App() {
     return resolveSecondaryMovies(movies, primaryFeaturedMovie?.id);
   }, [movies, primaryFeaturedMovie]);
 
-  const handleNavigate = useCallback((sectionId: string) => {
-    const element = document.getElementById(sectionId);
-    if (element) {
-      element.scrollIntoView({ behavior: 'smooth' });
-    }
-  }, []);
+  const handleNavigate = useCallback(
+    (sectionId: string) => {
+      // If we're on /my-orders, go home first
+      if (currentRoute === '/my-orders') {
+        navigateTo('/');
+        setTimeout(() => {
+          const element = document.getElementById(sectionId);
+          if (element) element.scrollIntoView({ behavior: 'smooth' });
+        }, 200);
+        return;
+      }
+      const element = document.getElementById(sectionId);
+      if (element) {
+        element.scrollIntoView({ behavior: 'smooth' });
+      }
+    },
+    [currentRoute, navigateTo]
+  );
 
   const handleAddMovie = async (newMovie: Movie) => {
     try {
@@ -113,7 +145,6 @@ export default function App() {
       await Promise.all([loadAdminData(), loadPublicStorefront()]);
     } catch (err: any) {
       console.error('Add movie failed:', err);
-      // Local fallback
       setAdminMovies((prev) => [newMovie, ...prev]);
     }
   };
@@ -190,6 +221,7 @@ export default function App() {
     setAdminPanelOpen(false);
   };
 
+  // Admin panel takes over the entire UI
   if (adminPanelOpen) {
     return (
       <AdminDashboard
@@ -207,12 +239,45 @@ export default function App() {
     );
   }
 
+  // ============================================================
+  // ROUTE: /my-orders
+  // ============================================================
+  if (currentRoute === '/my-orders') {
+    return (
+      <div className="min-h-screen bg-[#08070d] text-zinc-100 flex flex-col">
+        <Header
+          hasSecondaryMovies={secondaryMovies.length > 0}
+          onNavigate={handleNavigate}
+          onOpenAdminAccess={handleOpenAdminAccess}
+        />
+
+        <main className="flex-1">
+          <MyOrdersPage onBack={() => navigateTo('/')} />
+        </main>
+
+        <Footer
+          onOpenInfo={setInfoModalContent}
+          onOpenAdminAccess={handleOpenAdminAccess}
+        />
+
+        <InfoModal
+          content={infoModalContent}
+          onClose={() => setInfoModalContent(null)}
+        />
+      </div>
+    );
+  }
+
+  // ============================================================
+  // ROUTE: / (Home)
+  // ============================================================
   return (
     <div className="min-h-screen bg-[#08070d] text-zinc-100 flex flex-col selection:bg-purple-600 selection:text-white">
       <Header
         hasSecondaryMovies={secondaryMovies.length > 0}
         onNavigate={handleNavigate}
         onOpenAdminAccess={handleOpenAdminAccess}
+        onOpenMyOrders={() => navigateTo('/my-orders')}
       />
 
       <main className="flex-1 flex flex-col">
@@ -240,6 +305,7 @@ export default function App() {
       <Footer
         onOpenInfo={setInfoModalContent}
         onOpenAdminAccess={handleOpenAdminAccess}
+        onOpenMyOrders={() => navigateTo('/my-orders')}
       />
 
       <PurchaseModal
