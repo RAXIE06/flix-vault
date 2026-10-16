@@ -65,7 +65,6 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
 }) => {
   const [activeTab, setActiveTab] = useState<'movies' | 'storefront' | 'upi' | 'telegram' | 'gmail'>('movies');
 
-  // Modals state
   const [editModalOpen, setEditModalOpen] = useState(false);
   const [editingMovie, setEditingMovie] = useState<Movie | null>(null);
 
@@ -77,7 +76,6 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
 
   const [notification, setNotification] = useState<string | null>(null);
 
-  // UPI State
   const [upiOrders, setUpiOrders] = useState<UpiPaymentOrder[]>([]);
   const [upiConfig, setUpiConfig] = useState<UpiConfig>({
     upiVpa: 'flixvault@upi',
@@ -127,7 +125,6 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
     }
   };
 
-  // Fetch UPI orders and configuration when switching to UPI tab
   useEffect(() => {
     if (activeTab === 'upi') {
       loadUpiData();
@@ -290,7 +287,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
         </div>
       </header>
 
-      {/* Development / Security Status Banner */}
+      {/* Status Banner */}
       <div className="bg-amber-950/40 border-b border-amber-800/50 px-4 sm:px-8 py-2.5 text-xs text-amber-200 flex items-start sm:items-center gap-2.5 text-left">
         <ShieldAlert className="w-4 h-4 text-amber-400 shrink-0 mt-0.5 sm:mt-0" />
         <div className="flex-1">
@@ -301,10 +298,9 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
         </div>
       </div>
 
-      {/* Main Administrative Workspace */}
+      {/* Main Workspace */}
       <main className="flex-1 max-w-5xl mx-auto px-4 sm:px-6 lg:px-8 py-6 w-full text-left space-y-6">
         
-        {/* Real-time Notification Banner */}
         {notification && (
           <div className="p-3.5 rounded-xl bg-purple-950/50 border border-purple-700/60 text-xs text-purple-200 flex items-center justify-between gap-3 animate-in fade-in">
             <div className="flex items-center gap-2">
@@ -320,7 +316,6 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
           </div>
         )}
 
-        {/* MongoDB Atlas IP Whitelist Guidance Banner */}
         {dbStatus?.isIpWhitelistIssue && (
           <div className="p-4 rounded-xl bg-amber-950/40 border border-amber-700/60 text-xs text-amber-200 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 animate-in fade-in">
             <div className="flex items-start gap-3">
@@ -347,7 +342,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
           </div>
         )}
 
-        {/* Dashboard Navigation Tabs */}
+        {/* Navigation Tabs */}
         <div className="flex flex-col sm:flex-row items-stretch sm:items-center justify-between border-b border-purple-950/60 pb-4 gap-3">
           <div className="flex items-center gap-1.5 bg-[#120d20] p-1 rounded-xl border border-purple-950/50 overflow-x-auto">
             <button
@@ -418,9 +413,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
           )}
         </div>
 
-        {/* =========================================================================
-            SECTION 1: MOVIE MANAGEMENT
-           ========================================================================= */}
+        {/* SECTION 1: MOVIE MANAGEMENT */}
         {activeTab === 'movies' && (
           <div className="space-y-4">
             
@@ -433,7 +426,6 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
               </span>
             </div>
 
-            {/* Movie List Cards */}
             <div className="space-y-3">
               {movies.map((movie) => {
                 const isFeatured = !!movie.isFeatured;
@@ -452,7 +444,6 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                   >
                     <div className="flex flex-col md:flex-row items-start md:items-center justify-between gap-4">
                       
-                      {/* Movie Identity & Poster Thumbnail */}
                       <div className="flex items-center gap-4 min-w-0 flex-1">
                         <div className="w-16 h-20 sm:w-20 sm:h-24 rounded-xl overflow-hidden bg-black shrink-0 border border-purple-900/40">
                           <MoviePosterArt movie={movie} variant="compact" className="w-full h-full object-cover" />
@@ -502,10 +493,8 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                         </div>
                       </div>
 
-                      {/* Movie Action Controls */}
                       <div className="flex flex-wrap items-center gap-2 self-end md:self-auto shrink-0 w-full md:w-auto justify-end border-t md:border-t-0 pt-3 md:pt-0 border-purple-950/40">
                         
-                        {/* Mobile Storefront Preview Action */}
                         <button
                           onClick={() => handleOpenPreview(movie)}
                           className="px-2.5 py-1.5 rounded-lg bg-[#140f24] hover:bg-purple-950/60 text-purple-200 border border-purple-900/40 text-xs font-semibold flex items-center gap-1.5 transition-colors cursor-pointer"
@@ -515,7 +504,6 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                           <span className="hidden sm:inline">Mobile Preview</span>
                         </button>
 
-                        {/* Enable / Disable Toggle Action */}
                         <button
                           onClick={() => onToggleEnabled(movie.id)}
                           className={`px-2.5 py-1.5 rounded-lg text-xs font-semibold flex items-center gap-1.5 transition-colors cursor-pointer border ${
@@ -528,7 +516,6 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                           {isEnabled ? 'Hide' : 'Publish'}
                         </button>
 
-                        {/* Set Featured Action */}
                         {!isFeatured && isEnabled && (
                           <button
                             onClick={() => {
@@ -543,7 +530,6 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                           </button>
                         )}
 
-                        {/* Edit Action */}
                         <button
                           onClick={() => handleOpenEdit(movie)}
                           className="p-2 text-zinc-400 hover:text-purple-300 hover:bg-purple-950/50 rounded-lg transition-colors cursor-pointer"
@@ -552,7 +538,6 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                           <Edit2 className="w-4 h-4" />
                         </button>
 
-                        {/* Delete Action */}
                         <button
                           onClick={() => handleOpenDelete(movie)}
                           className="p-2 text-zinc-400 hover:text-rose-400 hover:bg-rose-950/40 rounded-lg transition-colors cursor-pointer"
@@ -572,26 +557,24 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
           </div>
         )}
 
-        {/* =========================================================================
-            SECTION 2: STOREFRONT SETTINGS
-           ========================================================================= */}
+        {/* SECTION 2: STOREFRONT SETTINGS */}
         {activeTab === 'storefront' && (
           <div className="space-y-6">
             
             {/* Storefront Overview Card */}
             <div className="p-5 sm:p-6 rounded-2xl bg-[#0e0a19] border border-purple-950/60 shadow-lg space-y-4">
               <h3 className="font-bold text-white text-base font-['Outfit']">
-                Storefront Capacity &amp; Curation Rule (1–5 Titles)
+                Storefront Overview
               </h3>
               
               <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
                 <div className="p-4 rounded-xl bg-[#140f24] border border-purple-950/50">
                   <span className="text-zinc-500 text-xs uppercase font-mono block">Published Titles</span>
                   <span className="text-2xl font-extrabold text-white font-['Outfit'] mt-1 block">
-                    {activeEnabledCount} of 5 Active
+                    {activeEnabledCount} Active
                   </span>
                   <span className="text-[11px] text-purple-400 mt-1 block">
-                    {activeEnabledCount <= 5 ? '✓ Within optimal 1–5 range' : '⚠️ Exceeds 5 items'}
+                    Live on the storefront
                   </span>
                 </div>
 
@@ -670,13 +653,10 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
           </div>
         )}
 
-        {/* =========================================================================
-            SECTION 3: UPI CONFIGURATION & PAY-PER-MOVIE ORDERS
-           ========================================================================= */}
+        {/* SECTION 3: UPI CONFIGURATION & ORDERS */}
         {activeTab === 'upi' && (
           <div className="space-y-6">
             
-            {/* UPI Settings Card */}
             <div className="p-5 sm:p-6 rounded-2xl bg-[#0e0a19] border border-purple-950/60 shadow-lg space-y-5">
               <div className="flex items-center justify-between border-b border-purple-950/50 pb-3">
                 <div className="flex items-center gap-2">
@@ -745,7 +725,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
               </form>
             </div>
 
-            {/* Generated UPI Orders Table (Phase 3B Automatic Payment Verification) */}
+            {/* UPI Orders Table */}
             <div className="p-5 sm:p-6 rounded-2xl bg-[#0e0a19] border border-purple-950/60 shadow-lg space-y-4">
               <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
                 <div>
@@ -784,7 +764,6 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                 </div>
               </div>
 
-              {/* Verification Scan Feedback Banner */}
               {verificationSummary && (
                 <div className="p-3.5 rounded-xl bg-purple-950/30 border border-purple-800/40 text-xs space-y-1">
                   <div className="flex items-center justify-between text-purple-300 font-semibold">
@@ -876,7 +855,6 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                           </div>
                         </div>
 
-                        {/* Additional Phase 3B verification metadata */}
                         {isVerified && (
                           <div className="p-2.5 rounded-lg bg-emerald-950/20 border border-emerald-900/30 flex flex-wrap items-center gap-x-4 gap-y-1 text-[11px] text-emerald-300/90 font-mono">
                             <span>Matched Amount: <strong>₹{(order.matchedAmountRupees || order.payableAmount).toFixed(2)}</strong> ({order.matchedAmountPaise || Math.round(order.payableAmount * 100)} paise)</span>
@@ -913,9 +891,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
           </div>
         )}
 
-        {/* =========================================================================
-            SECTION 4: TELEGRAM DELIVERY CONFIGURATION
-           ========================================================================= */}
+        {/* SECTION 4: TELEGRAM DELIVERY */}
         {activeTab === 'telegram' && (
           <TelegramConfigSection
             movies={movies}
@@ -933,16 +909,13 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
           />
         )}
 
-        {/* =========================================================================
-            SECTION 5: GMAIL IMAP VERIFICATION (PHASE 3A)
-           ========================================================================= */}
+        {/* SECTION 5: GMAIL IMAP VERIFICATION */}
         {activeTab === 'gmail' && (
           <GmailVerificationSection />
         )}
 
       </main>
 
-      {/* MODAL 1: ADD / EDIT MOVIE MODAL */}
       <MovieEditModal
         isOpen={editModalOpen}
         movie={editingMovie}
@@ -953,7 +926,6 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
         }}
       />
 
-      {/* MODAL 2: DELETE CONFIRMATION MODAL */}
       <DeleteConfirmModal
         movie={movieToDelete}
         onConfirm={handleConfirmDelete}
@@ -963,7 +935,6 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
         }}
       />
 
-      {/* MODAL 3: MOBILE VIEWPORT PREVIEW (390px) */}
       <MobilePreviewModal
         movie={previewMovie}
         onClose={() => {
