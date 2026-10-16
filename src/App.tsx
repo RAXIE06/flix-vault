@@ -8,7 +8,7 @@ import {
 import { api } from './services/api';
 import { Header } from './components/Header';
 import { FeaturedHero } from './components/FeaturedHero';
-import { SecondaryShowcase } from './components/SecondaryShowcase';
+import { MovieRow } from './components/MovieRow';
 import { MovieDetailsModal } from './components/MovieDetailsModal';
 import { PurchaseModal } from './components/PurchaseModal';
 import { AdminAccessModal } from './components/AdminAccessModal';
@@ -18,7 +18,6 @@ import { Footer } from './components/Footer';
 import { MyOrdersPage } from './components/MyOrdersPage';
 import { SplashScreen } from './components/SplashScreen';
 
-// ✅ Empty fallback — only real MongoDB movies will show
 const LOCAL_FALLBACK_MOVIES: Movie[] = [];
 
 export default function App() {
@@ -39,9 +38,7 @@ export default function App() {
   const [purchaseMovie, setPurchaseMovie] = useState<Movie | null>(null);
   const [infoModalContent, setInfoModalContent] = useState<InfoModalContent | null>(null);
 
-  // ============================================================
-  // ROUTING — hash-based
-  // ============================================================
+  // ROUTING
   const [currentRoute, setCurrentRoute] = useState<string>(() =>
     window.location.hash.replace('#', '') || '/'
   );
@@ -58,9 +55,7 @@ export default function App() {
     window.scrollTo({ top: 0, behavior: 'smooth' });
   }, []);
 
-  // ============================================================
-  // LOAD STOREFRONT — with retry logic for slow networks
-  // ============================================================
+  // LOAD STOREFRONT
   const loadPublicStorefront = useCallback(async () => {
     const fetchWithRetry = async (attempt: number): Promise<any> => {
       try {
@@ -82,23 +77,19 @@ export default function App() {
       const { moviesRes, healthRes } = await fetchWithRetry(1);
 
       if (moviesRes?.movies) {
-        // Only replace if we got a valid array (empty arrays preserve current)
         setMovies((prev) => (moviesRes.movies.length > 0 ? moviesRes.movies : prev));
         setStorageSource(moviesRes.storage || 'mongodb');
       }
       if (healthRes?.database) setDbStatus(healthRes.database);
     } catch (err: any) {
       console.warn('[FlixVault] Server unavailable after retries');
-      // Only set fallback if we currently have no movies at all
       setMovies((prev) => (prev.length > 0 ? prev : LOCAL_FALLBACK_MOVIES));
       setStorageSource('offline');
       setDbStatus({ connected: false, fallback: true });
     }
   }, []);
 
-  // ============================================================
   // LOAD ANNOUNCEMENT
-  // ============================================================
   const loadAnnouncement = useCallback(async () => {
     try {
       const res = await fetch('/api/settings/announcement');
@@ -107,7 +98,7 @@ export default function App() {
       if (data.text) setAnnouncement(data.text);
       setAnnouncementEnabled(data.enabled !== false);
     } catch {
-      // Ignore — use default
+      // Ignore
     }
   }, []);
 
@@ -142,6 +133,36 @@ export default function App() {
     [movies, primaryFeaturedMovie]
   );
 
+  // ============================================================
+  // MOVIE ROW DATA — 3 rows
+  // ============================================================
+  const trendingMovies = useMemo(() => {
+    // All secondary movies (as-is order)
+    return secondaryMovies;
+  }, [secondaryMovies]);
+
+  const newReleasesMovies = useMemo(() => {
+    // Sort by year descending (newest first)
+    return [...secondaryMovies].sort((a, b) => (b.year || 0) - (a.year || 0));
+  }, [secondaryMovies]);
+
+  const topRatedMovies = useMemo(() => {
+    // Sort by rating (A rated first, then U/A 16+, U/A 13+, etc.)
+    const ratingOrder: Record<string, number> = {
+      'A': 5,
+      'U/A 16+': 4,
+      'U/A 13+': 3,
+      'U/A 7+': 2,
+      'U': 1,
+    };
+    return [...secondaryMovies].sort(
+      (a, b) => (ratingOrder[b.rating] || 0) - (ratingOrder[a.rating] || 0)
+    );
+  }, [secondaryMovies]);
+
+  // ============================================================
+  // HANDLERS
+  // ============================================================
   const handleNavigate = useCallback(
     (sectionId: string) => {
       if (currentRoute === '/my-orders') {
@@ -218,7 +239,6 @@ export default function App() {
     }
   };
 
-  // ✅ When admin saves announcement, update local state instantly
   const handleAnnouncementSaved = (text: string, enabled: boolean) => {
     setAnnouncement(text);
     setAnnouncementEnabled(enabled);
@@ -242,16 +262,12 @@ export default function App() {
     setAdminPanelOpen(false);
   };
 
-  // ============================================================
-  // SPLASH SCREEN — shown for first 2.2 seconds
-  // ============================================================
+  // SPLASH SCREEN
   if (showSplash) {
     return <SplashScreen onFinish={() => setShowSplash(false)} />;
   }
 
-  // ============================================================
   // ADMIN PANEL
-  // ============================================================
   if (adminPanelOpen) {
     return (
       <AdminDashboard
@@ -271,9 +287,7 @@ export default function App() {
     );
   }
 
-  // ============================================================
   // ROUTE: /my-orders
-  // ============================================================
   if (currentRoute === '/my-orders') {
     return (
       <div className="min-h-screen bg-[#08070d] text-zinc-100 flex flex-col">
@@ -304,9 +318,7 @@ export default function App() {
     );
   }
 
-  // ============================================================
   // ROUTE: / (Home)
-  // ============================================================
   return (
     <div className="min-h-screen bg-[#08070d] text-zinc-100 flex flex-col selection:bg-purple-600 selection:text-white">
       <Header
@@ -319,6 +331,7 @@ export default function App() {
       />
 
       <main className="flex-1 flex flex-col">
+        {/* FEATURED HERO */}
         {primaryFeaturedMovie ? (
           <FeaturedHero
             movie={primaryFeaturedMovie}
@@ -335,12 +348,39 @@ export default function App() {
           </div>
         )}
 
+        {/* MOVIE ROWS */}
         {secondaryMovies.length > 0 && (
-          <SecondaryShowcase
-            movies={secondaryMovies}
-            onBuyNow={(movie) => setPurchaseMovie(movie)}
-            onViewDetails={(movie) => setDetailsMovie(movie)}
-          />
+          <div className="space-y-2 sm:space-y-4 pb-8">
+            {/* Row 1: Trending Now */}
+            <MovieRow
+              title="Trending Now"
+              subtitle="Most watched titles this week"
+              movies={trendingMovies}
+              onBuyNow={(movie) => setPurchaseMovie(movie)}
+              onViewDetails={(movie) => setDetailsMovie(movie)}
+              accentColor="#a855f7"
+            />
+
+            {/* Row 2: New Releases */}
+            <MovieRow
+              title="New Releases"
+              subtitle="Freshly added to the vault"
+              movies={newReleasesMovies}
+              onBuyNow={(movie) => setPurchaseMovie(movie)}
+              onViewDetails={(movie) => setDetailsMovie(movie)}
+              accentColor="#ec4899"
+            />
+
+            {/* Row 3: Top Rated */}
+            <MovieRow
+              title="Top Rated"
+              subtitle="Premium titles with best ratings"
+              movies={topRatedMovies}
+              onBuyNow={(movie) => setPurchaseMovie(movie)}
+              onViewDetails={(movie) => setDetailsMovie(movie)}
+              accentColor="#f59e0b"
+            />
+          </div>
         )}
       </main>
 
