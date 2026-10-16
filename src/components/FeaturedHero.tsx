@@ -1,5 +1,5 @@
 import React from 'react';
-import { ShoppingBag, Info, Sparkles, Clock, Film, ShieldCheck, Play } from 'lucide-react';
+import { ShoppingBag, Info, Sparkles, Clock, Film, ShieldCheck, Play, Languages } from 'lucide-react';
 import { Movie } from '../types';
 import { MoviePosterArt } from './MoviePosterArt';
 
@@ -24,12 +24,11 @@ export const FeaturedHero: React.FC<FeaturedHeroProps> = ({
           {/* Subtle Ambient Radial Glow */}
           <div className="absolute top-0 right-1/4 w-72 sm:w-96 h-72 sm:h-96 bg-purple-600/15 rounded-full blur-[100px] pointer-events-none" />
 
-          {/* Responsive Split / Stacked Layout: Mobile-first */}
+          {/* Responsive Split / Stacked Layout */}
           <div className="grid grid-cols-1 md:grid-cols-12 gap-0 md:gap-8 items-center">
             
-            {/* Featured Artwork: Substantial Mobile Visual Anchor */}
+            {/* Featured Artwork */}
             <div className="md:col-span-5 relative w-full overflow-hidden bg-black/60">
-              {/* Artwork wrapper: 16/10 on mobile for great vertical rhythm, 3/4 portrait on desktop */}
               <div className="relative w-full aspect-[16/11] sm:aspect-[4/3] md:aspect-[3/4] overflow-hidden">
                 <MoviePosterArt
                   movie={movie}
@@ -37,7 +36,6 @@ export const FeaturedHero: React.FC<FeaturedHeroProps> = ({
                   className="w-full h-full object-cover"
                 />
                 
-                {/* Seamless scrim overlay fading smoothly into content */}
                 <div className="absolute inset-0 bg-gradient-to-t from-[#130d22] via-[#130d22]/40 to-transparent md:hidden" />
                 <div className="hidden md:block absolute inset-0 bg-gradient-to-r from-transparent via-transparent to-[#130d22]/80" />
 
@@ -80,6 +78,21 @@ export const FeaturedHero: React.FC<FeaturedHeroProps> = ({
               <h1 className="text-2xl sm:text-4xl md:text-5xl font-extrabold text-white tracking-tight leading-[1.1] font-['Outfit']">
                 {movie.title}
               </h1>
+
+              {/* Languages Badge Row (Batch 2 addition) */}
+              {movie.languages && movie.languages.length > 0 && (
+                <div className="flex flex-wrap items-center gap-1.5 pt-0.5">
+                  <Languages className="w-3.5 h-3.5 text-emerald-400 shrink-0" />
+                  {movie.languages.map((lang) => (
+                    <span
+                      key={lang}
+                      className="px-2 py-0.5 rounded-md text-[10px] font-semibold bg-emerald-950/60 border border-emerald-800/50 text-emerald-300 tracking-wide"
+                    >
+                      {lang}
+                    </span>
+                  ))}
+                </div>
+              )}
 
               {/* Tagline / Hook */}
               {movie.tagline && (
@@ -129,7 +142,7 @@ export const FeaturedHero: React.FC<FeaturedHeroProps> = ({
                   </div>
                 </div>
 
-                {/* Primary Purchase Button: Large, high-visibility purple gradient (touch target >= 48px) */}
+                {/* Primary Purchase Button */}
                 <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2.5">
                   <button
                     onClick={() => onBuyNow(movie)}
