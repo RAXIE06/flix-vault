@@ -38,7 +38,7 @@ export const MovieEditModal: React.FC<MovieEditModalProps> = ({
   const [synopsis, setSynopsis] = useState('');
   const [year, setYear] = useState<number>(2025);
   const [duration, setDuration] = useState('2h 10m');
-  const [rating, setRating] = useState('PG-13');
+  const [rating, setRating] = useState('U/A 13+');
   const [selectedGenres, setSelectedGenres] = useState<string[]>(['Sci-Fi']);
   const [priceSample, setPriceSample] = useState('₹149');
   const [director, setDirector] = useState('');
@@ -96,7 +96,7 @@ export const MovieEditModal: React.FC<MovieEditModalProps> = ({
       setSynopsis('');
       setYear(2025);
       setDuration('2h 00m');
-      setRating('PG-13');
+      setRating('U/A 13+');
       setSelectedGenres(['Sci-Fi', 'Mystery']);
       setPriceSample('₹149');
       setDirector('Elena Vance');
@@ -207,10 +207,8 @@ export const MovieEditModal: React.FC<MovieEditModalProps> = ({
     let finalPosterContentType = movie?.posterContentType;
     let finalPosterSize = movie?.posterSize;
 
-    // Poster upload handling
     if (selectedPosterFile) {
       if (movie) {
-        // EDIT MODE: Upload directly to this movie
         try {
           setIsUploadingPoster(true);
           setPosterError(null);
@@ -228,7 +226,6 @@ export const MovieEditModal: React.FC<MovieEditModalProps> = ({
           setIsUploadingPoster(false);
         }
       } else {
-        // ADD MODE: Movie must exist first to attach poster
         setPosterError(
           '⚠️ Poster upload is only available in edit mode. Please save the movie first, then edit it to add a poster.'
         );
@@ -236,7 +233,6 @@ export const MovieEditModal: React.FC<MovieEditModalProps> = ({
         return;
       }
     } else if (!posterPreviewUrl && movie) {
-      // Edit mode: User removed the poster
       finalPosterStorageId = '';
       finalCustomPosterUrl = '';
       finalPosterContentType = '';
@@ -486,16 +482,19 @@ export const MovieEditModal: React.FC<MovieEditModalProps> = ({
                 </div>
 
                 <div>
-                  <label className="block text-xs font-semibold text-zinc-300 mb-1">Rating</label>
+                  <label className="block text-xs font-semibold text-zinc-300 mb-1">
+                    Rating / Certificate (CBFC)
+                  </label>
                   <select
                     value={rating}
                     onChange={(e) => setRating(e.target.value)}
                     className="w-full px-3 py-2 bg-[#140f24] border border-purple-950/70 focus:border-purple-500 rounded-xl text-xs text-white focus:outline-none cursor-pointer"
                   >
-                    <option value="PG-13">PG-13</option>
-                    <option value="R">R</option>
-                    <option value="PG">PG</option>
-                    <option value="G">G</option>
+                    <option value="U">U — Universal (All Ages)</option>
+                    <option value="U/A 7+">U/A 7+ — Parental Guidance (7+)</option>
+                    <option value="U/A 13+">U/A 13+ — 13 Years &amp; Above</option>
+                    <option value="U/A 16+">U/A 16+ — 16 Years &amp; Above</option>
+                    <option value="A">A — Adults Only (18+)</option>
                   </select>
                 </div>
               </div>
