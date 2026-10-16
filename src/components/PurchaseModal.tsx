@@ -14,6 +14,7 @@ import {
   Send,
   Clock,
   Smartphone,
+  Download,
 } from 'lucide-react';
 import QRCode from 'qrcode';
 import { Movie, UpiPaymentOrder, UserOrderRecord } from '../types';
@@ -24,12 +25,10 @@ interface PurchaseModalProps {
   onClose: () => void;
 }
 
-const VERIFY_MAX_SECONDS = 120;
+// ✅ Changed from 120 to 300 (5 minutes)
+const VERIFY_MAX_SECONDS = 300;
 const RECOVERY_STORAGE_KEY = 'flixvault_my_orders';
 
-/**
- * Save/Update order in localStorage for recovery after browser refresh.
- */
 function saveOrderToLocalStorage(order: UpiPaymentOrder) {
   try {
     const raw = localStorage.getItem(RECOVERY_STORAGE_KEY);
@@ -48,7 +47,7 @@ function saveOrderToLocalStorage(order: UpiPaymentOrder) {
     };
 
     const filtered = existing.filter((o) => o.orderId !== order.orderId);
-    const updated = [record, ...filtered].slice(0, 20); // keep last 20
+    const updated = [record, ...filtered].slice(0, 20);
 
     localStorage.setItem(RECOVERY_STORAGE_KEY, JSON.stringify(updated));
   } catch (e) {
@@ -192,7 +191,27 @@ export const PurchaseModal: React.FC<PurchaseModalProps> = ({ movie, onClose }) 
   };
 
   // ============================================================
-  // UPI DEEP LINK HANDLER (Batch 3 fix)
+  // ✅ DOWNLOAD QR — saves QR image to device
+  // ============================================================
+  const handleDownloadQr = () => {
+    if (!qrDataUrl || !order) return;
+    try {
+      const link = document.createElement('a');
+      link.href = qrDataUrl;
+      link.download = `FlixVault-${order.orderId}-UPI-QR.png`;
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      setUpiPhoneHint('✅ QR code download ho gaya! Ab UPI app se gallery mein jaake scan karo.');
+      setTimeout(() => setUpiPhoneHint(null), 5000);
+    } catch {
+      setUpiPhoneHint('QR download nahi ho paya. Screenshot lekar bhi use kar sakte hain.');
+      setTimeout(() => setUpiPhoneHint(null), 5000);
+    }
+  };
+
+  // ============================================================
+  // ✅ UPI DEEP LINK — uses EXACT server URI (proven to work with QR)
   // ============================================================
   const handleOpenUpiApp = () => {
     if (!order) return;
@@ -201,37 +220,37 @@ export const PurchaseModal: React.FC<PurchaseModalProps> = ({ movie, onClose }) 
 
     if (!isMobile) {
       setUpiPhoneHint(
-        'Please scan the QR code above with your phone. UPI app deep links work only on mobile.'
+        '📱 Please scan the QR code above with your phone. UPI app deep links work only on mobile.'
       );
       setTimeout(() => setUpiPhoneHint(null), 5000);
       return;
     }
 
-    // Build a clean, standards-compliant UPI URI
-    // Only replace space (not @) in payee name — critical for GPay/PhonePe compatibility
-    const cleanPayeeName = (order.upiPayeeName || 'FlixVault').replace(/\s+/g, '_');
-    const cleanVpa = order.upiVpa;
-    const cleanAmount = order.payableAmount.toFixed(2);
-    const cleanOrderId = order.orderId.replace(/[^A-Za-z0-9-]/g, '');
+    // ✅ Use the EXACT same URI that the QR code uses
+    // This is server-generated and proven to work
+    const uri = order.upiPaymentUri;
 
-    const uri = `upi://pay?pa=${encodeURIComponent(cleanVpa)}&pn=${encodeURIComponent(
-      cleanPayeeName
-    )}&am=${cleanAmount}&cu=INR&tn=${encodeURIComponent(cleanOrderId)}`;
+    if (!uri || !uri.startsWith('upi://')) {
+      setUpiPhoneHint(
+        '⚠️ Invalid UPI link. Please scan the QR code above — that always works.'
+      );
+      setTimeout(() => setUpiPhoneHint(null), 6000);
+      return;
+    }
 
-    // Try multiple fallback strategies
     try {
-      // Primary: direct navigation (works best on Android Chrome/Safari)
+      // Direct navigation — most compatible approach
       window.location.href = uri;
 
-      // Fallback: if app doesn't open in 2.5s, show hint
+      // Fallback hint if app doesn't open
       setTimeout(() => {
         setUpiPhoneHint(
-          'If your UPI app did not open, please scan the QR code above — that always works.'
+          '💡 Agar UPI app nahi khula, toh QR code scan karo — wo 100% reliable hai. Ya "Download QR" button se save karke UPI app mein gallery se scan karo.'
         );
-        setTimeout(() => setUpiPhoneHint(null), 6000);
+        setTimeout(() => setUpiPhoneHint(null), 8000);
       }, 2500);
-    } catch (err) {
-      setUpiPhoneHint('Could not open UPI app. Please use the QR code.');
+    } catch {
+      setUpiPhoneHint('Could not open UPI app. Please use the QR code or Download QR.');
       setTimeout(() => setUpiPhoneHint(null), 6000);
     }
   };
@@ -246,14 +265,17 @@ export const PurchaseModal: React.FC<PurchaseModalProps> = ({ movie, onClose }) 
     if (secondsElapsed < 15) {
       return '💡 Payment करते ही link automatically यहाँ appear होगा। कृपया wait करें...';
     }
-    if (secondsElapsed < 45) {
+    if (secondsElapsed < 60) {
       return '🔍 FamApp alert से payment match कर रहे हैं... Usually 30-60 seconds लगते हैं।';
     }
-    if (secondsElapsed < 90) {
+    if (secondsElapsed < 150) {
       return '⏳ Almost there! आपका payment verify हो रहा है...';
     }
-    if (secondsElapsed < 120) {
+    if (secondsElapsed < 240) {
       return '🔔 Final check चल रही है... Link कुछ seconds में आ जाएगा।';
+    }
+    if (secondsElapsed < 300) {
+      return '⏱️ Almost done! बस थोड़ा और wait करें...';
     }
     return '✋ थोड़ा ज़्यादा time लग रहा है। अगर payment हो गया है तो link कुछ देर में आ जाएगा। Problem हो तो Support से बात करें।';
   };
@@ -315,8 +337,7 @@ export const PurchaseModal: React.FC<PurchaseModalProps> = ({ movie, onClose }) 
 
         {order && !loading && (
           <div className="space-y-4">
-
-            {/* VERIFIED STATE — Telegram Link */}
+            {/* VERIFIED STATE */}
             {order.status === 'verified' && order.telegramInviteLink && (
               <div className="p-4 rounded-xl bg-gradient-to-br from-emerald-950/60 to-purple-950/40 border-2 border-emerald-600/70 space-y-3">
                 <div className="flex items-center gap-2 text-emerald-300 font-bold text-base">
@@ -346,7 +367,7 @@ export const PurchaseModal: React.FC<PurchaseModalProps> = ({ movie, onClose }) 
               </div>
             )}
 
-            {/* PENDING STATE — QR */}
+            {/* PENDING STATE */}
             {order.status !== 'verified' && (
               <>
                 <div className="p-3 rounded-xl bg-[#130d22] border border-purple-950/60 flex items-center justify-between text-xs">
@@ -397,7 +418,7 @@ export const PurchaseModal: React.FC<PurchaseModalProps> = ({ movie, onClose }) 
                     </div>
                   </div>
 
-                  <div className="flex items-center gap-2 p-2 rounded-lg bg-[#0e0919] border border-purple-950/70 text-xs text-zinc-300">
+                  <div className="flex items-center gap-2 p-2 rounded-lg bg-[#0e0919] border border-purple-950/70 text-xs text-zinc-300 mb-3">
                     <span className="text-zinc-500 font-mono text-[11px]">UPI VPA:</span>
                     <span className="font-mono text-purple-300 font-semibold">{order.upiVpa}</span>
                     <button
@@ -408,10 +429,8 @@ export const PurchaseModal: React.FC<PurchaseModalProps> = ({ movie, onClose }) 
                     </button>
                   </div>
 
-                  {/* ============================================================ */}
-                  {/* UPI DEEP LINK BUTTON (Batch 3 fixed)                         */}
-                  {/* ============================================================ */}
-                  <div className="w-full pt-3">
+                  {/* ✅ UPI Deep Link Button */}
+                  <div className="w-full">
                     <button
                       type="button"
                       onClick={handleOpenUpiApp}
@@ -423,6 +442,18 @@ export const PurchaseModal: React.FC<PurchaseModalProps> = ({ movie, onClose }) 
                     </button>
                   </div>
 
+                  {/* ✅ Download QR Button (NEW) */}
+                  <div className="w-full pt-2">
+                    <button
+                      type="button"
+                      onClick={handleDownloadQr}
+                      className="w-full min-h-[42px] py-2 px-4 rounded-xl bg-[#1a1428] hover:bg-[#231a38] text-purple-200 hover:text-white border border-purple-800/60 text-xs font-semibold transition-colors flex items-center justify-center gap-2 cursor-pointer"
+                    >
+                      <Download className="w-3.5 h-3.5" />
+                      <span>Download QR Code</span>
+                    </button>
+                  </div>
+
                   {upiPhoneHint && (
                     <div className="w-full mt-2 p-2.5 rounded-lg bg-amber-950/50 border border-amber-800/60 text-[11px] text-amber-200 text-left leading-relaxed">
                       {upiPhoneHint}
@@ -430,10 +461,10 @@ export const PurchaseModal: React.FC<PurchaseModalProps> = ({ movie, onClose }) 
                   )}
 
                   <p className="text-[10px] text-zinc-500 mt-2 text-center">
-                    📱 On mobile? Deep link works. On desktop? Use the QR code above.
+                    📱 On mobile? Deep link works. On desktop? Scan or download QR.
                   </p>
 
-                  {/* LIVE VERIFICATION TIMER */}
+                  {/* LIVE VERIFICATION TIMER — 5 minutes */}
                   <div
                     className={`w-full mt-3 p-3.5 rounded-xl border space-y-2 transition-all ${
                       isTimedOut
@@ -505,7 +536,6 @@ export const PurchaseModal: React.FC<PurchaseModalProps> = ({ movie, onClose }) 
               </>
             )}
 
-            {/* Verified but no telegram link yet */}
             {order.status === 'verified' && !order.telegramInviteLink && (
               <div className="p-4 rounded-xl bg-purple-950/40 border border-purple-800/60 text-center space-y-2">
                 <Check className="w-8 h-8 text-emerald-400 mx-auto" />
