@@ -7,6 +7,7 @@ interface HeaderProps {
   onOpenAdminAccess?: () => void;
   onOpenMyOrders?: () => void;
   announcementText?: string;
+  announcementEnabled?: boolean;
 }
 
 export const Header: React.FC<HeaderProps> = ({
@@ -15,41 +16,45 @@ export const Header: React.FC<HeaderProps> = ({
   onOpenAdminAccess,
   onOpenMyOrders,
   announcementText,
+  announcementEnabled = true,
 }) => {
-  const defaultNotice =
+  const fallback =
     '📢 Welcome to FlixVault — Buy any movie for just ₹19! Instant Telegram delivery. Support: @Owner_helpbot';
-  const notice = announcementText || defaultNotice;
+  const notice = announcementText || fallback;
+  const showMarquee = announcementEnabled && notice.trim().length > 0;
 
   return (
     <>
       {/* ANNOUNCEMENT MARQUEE */}
-      <div className="w-full bg-gradient-to-r from-purple-900 via-purple-700 to-purple-900 overflow-hidden border-b border-purple-500/30 relative">
-        <div className="relative flex items-center h-9">
-          <style>{`
-            @keyframes flixvault-marquee {
-              0% { transform: translateX(100%); }
-              100% { transform: translateX(-100%); }
-            }
-            .flixvault-marquee-text {
-              animation: flixvault-marquee 30s linear infinite;
-              white-space: nowrap;
-              display: inline-block;
-              padding-left: 20px;
-            }
-            .flixvault-marquee-text:hover {
-              animation-play-state: paused;
-            }
-          `}</style>
+      {showMarquee && (
+        <div className="w-full bg-gradient-to-r from-purple-900 via-purple-700 to-purple-900 overflow-hidden border-b border-purple-500/30 relative">
+          <div className="relative flex items-center h-9">
+            <style>{`
+              @keyframes flixvault-marquee {
+                0% { transform: translateX(100%); }
+                100% { transform: translateX(-100%); }
+              }
+              .flixvault-marquee-text {
+                animation: flixvault-marquee 30s linear infinite;
+                white-space: nowrap;
+                display: inline-block;
+                padding-left: 20px;
+              }
+              .flixvault-marquee-text:hover {
+                animation-play-state: paused;
+              }
+            `}</style>
 
-          <div className="absolute left-2 z-10 flex items-center justify-center w-6 h-6 rounded-full bg-purple-950/80 border border-purple-500/50 shadow-md">
-            <Megaphone className="w-3 h-3 text-purple-200" />
-          </div>
+            <div className="absolute left-2 z-10 flex items-center justify-center w-6 h-6 rounded-full bg-purple-950/80 border border-purple-500/50 shadow-md">
+              <Megaphone className="w-3 h-3 text-purple-200" />
+            </div>
 
-          <div className="flixvault-marquee-text text-xs sm:text-sm font-semibold text-white tracking-wide">
-            {notice}
+            <div className="flixvault-marquee-text text-xs sm:text-sm font-semibold text-white tracking-wide">
+              {notice}
+            </div>
           </div>
         </div>
-      </div>
+      )}
 
       {/* MAIN HEADER */}
       <header className="sticky top-0 z-40 w-full bg-[#08070d]/95 backdrop-blur-md border-b border-purple-950/40">
