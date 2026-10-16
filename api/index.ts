@@ -1,4 +1,4 @@
-// api/index.ts — Full Backend (MongoDB + All Routes)
+// api/index.ts — Full Backend (MongoDB + Telegram Integration)
 import express from 'express';
 import cookieParser from 'cookie-parser';
 import dotenv from 'dotenv';
@@ -129,6 +129,9 @@ const OrderSchema = new mongoose.Schema({
   qrString: String,
   upiPaymentUri: String,
   upiPayeeName: String,
+  telegramInviteLink: String,
+  telegramInviteGeneratedAt: Date,
+  telegramDeliveredAt: Date,
 }, { timestamps: true, strict: false });
 
 const OrderModel = mongoose.models.Order || mongoose.model('Order', OrderSchema);
@@ -183,6 +186,58 @@ function requireAdmin(req: any, res: any, next: any) {
 }
 
 // ============================================================
+// TELEGRAM ONE-TIME INVITE LINK GENERATOR
+// ============================================================
+async function generateTelegramInviteLink(
+  channelId: string,
+  orderId: string
+): Promise<string | null> {
+  try {
+    const BOT_TOKEN = process.env.TELEGRAM_BOT_TOKEN;
+    if (!BOT_TOKEN) {
+      console.error('[TELEGRAM] TELEGRAM_BOT_TOKEN not configured');
+      return null;
+    }
+
+    if (!channelId) {
+      console.error('[TELEGRAM] Channel ID is empty');
+      return null;
+    }
+
+    let chatId = channelId.trim();
+    if (!chatId.startsWith('@') && !chatId.startsWith('-')) {
+      chatId = '@' + chatId;
+    }
+
+    const response = await fetch(
+      `https://api.telegram.org/bot${BOT_TOKEN}/createChatInviteLink`,
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          chat_id: chatId,
+          member_limit: 1,
+          name: `Order ${orderId}`,
+        }),
+      }
+    );
+
+    const data: any = await response.json();
+
+    if (!data.ok) {
+      console.error('[TELEGRAM] API error:', data.description);
+      return null;
+    }
+
+    console.log('[TELEGRAM] One-time link created for', orderId, ':', data.result.invite_link);
+    return data.result.invite_link;
+  } catch (err: any) {
+    console.error('[TELEGRAM] Invite generation failed:', err.message);
+    return null;
+  }
+}
+
+// ============================================================
 // HEALTH
 // ============================================================
 app.get('/api/health', (_req, res) => {
@@ -192,6 +247,9 @@ app.get('/api/health', (_req, res) => {
       connected: mongoose.connection.readyState === 1,
       name: mongoose.connection.name || null,
       readyState: mongoose.connection.readyState,
+    },
+    telegram: {
+      botConfigured: !!process.env.TELEGRAM_BOT_TOKEN,
     },
     timestamp: new Date().toISOString(),
   });
@@ -242,7 +300,7 @@ app.get('/api/movies/:id/poster', async (req, res) => {
 });
 
 // ============================================================
-// ORDER ROUTES (Pay-Per-Movie UPI)
+// ORDER ROUTES (Pay-Per-Movie UPI + Telegram)
 // ============================================================
 app.post('/api/orders/create', async (req, res) => {
   try {
@@ -250,7 +308,6 @@ app.post('/api/orders/create', async (req, res) => {
     const { movieId } = req.body || {};
     if (!movieId) return res.status(400).json({ error: 'movieId is required' });
 
-    // Try DB first, fallback to any movie with this id
     let movie = await MovieModel.findOne({ id: movieId }).lean();
     if (!movie) {
       const anyMovie = await MovieModel.findOne({}).lean();
@@ -264,7 +321,6 @@ app.post('/api/orders/create', async (req, res) => {
     const upiVpa = settings?.upiConfig?.upiVpa || process.env.UPI_VPA || 'flixvault@upi';
     const payeeName = settings?.upiConfig?.payeeName || 'FlixVault Cinema';
 
-    // Random discount: ₹0.01 to ₹1.00
     const discountRupees = Math.round((0.01 + Math.random() * 0.99) * 100) / 100;
     const basePrice = movie.priceNumeric || 149;
     const payableAmount = Math.round((basePrice - discountRupees) * 100) / 100;
@@ -274,6 +330,16 @@ app.post('/api/orders/create', async (req, res) => {
 
     const amountStr = payableAmount.toFixed(2);
     const upiString = `upi://pay?pa=${encodeURIComponent(upiVpa)}&pn=${encodeURIComponent(payeeName)}&am=${amountStr}&cu=INR&tn=${encodeURIComponent(orderId)}`;
+
+    // Pre-generate Telegram one-time invite link (if channel configured)
+    let telegramInviteLink: string | undefined;
+    if (movie.telegramChannelId) {
+      const link = await generateTelegramInviteLink(movie.telegramChannelId, orderId);
+      if (link) {
+        telegramInviteLink = link;
+        console.log('[ORDER] Telegram link pre-generated for', orderId);
+      }
+    }
 
     const order = new OrderModel({
       orderId,
@@ -289,6 +355,8 @@ app.post('/api/orders/create', async (req, res) => {
       qrString: upiString,
       upiPaymentUri: upiString,
       upiPayeeName: payeeName,
+      telegramInviteLink,
+      telegramInviteGeneratedAt: telegramInviteLink ? new Date() : undefined,
     });
     await order.save();
 
@@ -310,10 +378,14 @@ app.get('/api/orders/:orderId', async (req, res) => {
       await order.save();
     }
 
-    // Normalize field names for frontend compatibility
     const orderObj: any = order.toObject();
     orderObj.upiPaymentUri = orderObj.upiPaymentUri || orderObj.qrString;
     orderObj.upiPayeeName = orderObj.upiPayeeName || orderObj.payeeName;
+
+    // Only expose Telegram link if order is verified
+    if (orderObj.status !== 'verified') {
+      delete orderObj.telegramInviteLink;
+    }
 
     res.json(orderObj);
   } catch (err: any) {
@@ -607,7 +679,6 @@ app.get('/api/admin/orders', requireAdmin, async (_req, res) => {
       if (o.status === 'pending' && o.expiresAt && new Date(o.expiresAt) < now) {
         o.status = 'expired';
       }
-      // Normalize field names for frontend
       o.upiPaymentUri = o.upiPaymentUri || o.qrString;
       o.upiPayeeName = o.upiPayeeName || o.payeeName;
       return o;
@@ -619,6 +690,99 @@ app.get('/api/admin/orders', requireAdmin, async (_req, res) => {
   }
 });
 
+// ADMIN: Manual verify an order (for testing / manual approval)
+app.post('/api/admin/orders/:orderId/verify-manual', requireAdmin, async (req, res) => {
+  try {
+    await connectDB();
+    const { orderId } = req.params;
+    const order = await OrderModel.findOne({ orderId });
+    if (!order) return res.status(404).json({ error: 'Order not found' });
+
+    order.status = 'verified';
+    order.verifiedAt = new Date();
+    order.verificationReason = 'Manually verified by admin';
+    order.matchedUtr = req.body?.utr || 'MANUAL-ADMIN';
+    order.maskedUtr = order.matchedUtr.slice(0, 4) + '****' + order.matchedUtr.slice(-4);
+
+    // If no telegram link yet, generate now
+    if (!order.telegramInviteLink) {
+      const movie = await MovieModel.findOne({ id: order.movieId }).lean();
+      if (movie?.telegramChannelId) {
+        const link = await generateTelegramInviteLink(movie.telegramChannelId, orderId);
+        if (link) {
+          order.telegramInviteLink = link;
+          order.telegramInviteGeneratedAt = new Date();
+        }
+      }
+    }
+
+    await order.save();
+
+    res.json({
+      success: true,
+      order: {
+        ...order.toObject(),
+        upiPaymentUri: order.qrString,
+        upiPayeeName: order.payeeName,
+      },
+    });
+  } catch (err: any) {
+    console.error('[MANUAL VERIFY]', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// ADMIN: Get Telegram invite link for a specific order
+app.get('/api/admin/orders/:orderId/telegram-link', requireAdmin, async (req, res) => {
+  try {
+    await connectDB();
+    const order = await OrderModel.findOne({ orderId: req.params.orderId }).lean();
+    if (!order) return res.status(404).json({ error: 'Order not found' });
+
+    res.json({
+      success: true,
+      orderId: order.orderId,
+      status: order.status,
+      telegramInviteLink: (order as any).telegramInviteLink || null,
+      hasLink: !!(order as any).telegramInviteLink,
+    });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// ADMIN: Generate Telegram link for an existing order (on demand)
+app.post('/api/admin/orders/:orderId/generate-telegram-link', requireAdmin, async (req, res) => {
+  try {
+    await connectDB();
+    const order = await OrderModel.findOne({ orderId: req.params.orderId });
+    if (!order) return res.status(404).json({ error: 'Order not found' });
+
+    if (order.telegramInviteLink) {
+      return res.json({ success: true, telegramInviteLink: order.telegramInviteLink });
+    }
+
+    const movie = await MovieModel.findOne({ id: order.movieId }).lean();
+    if (!movie?.telegramChannelId) {
+      return res.status(400).json({ error: 'No Telegram channel configured for this movie' });
+    }
+
+    const link = await generateTelegramInviteLink(movie.telegramChannelId, order.orderId);
+    if (!link) {
+      return res.status(500).json({ error: 'Telegram API failed. Check TELEGRAM_BOT_TOKEN and bot admin permissions.' });
+    }
+
+    order.telegramInviteLink = link;
+    order.telegramInviteGeneratedAt = new Date();
+    await order.save();
+
+    res.json({ success: true, telegramInviteLink: link });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Auto payment verification (Gmail IMAP) — kept as stub
 app.post('/api/admin/orders/verify-payments', requireAdmin, async (_req, res) => {
   res.json({
     success: true,
@@ -678,7 +842,7 @@ app.put('/api/admin/upi-config', requireAdmin, async (req, res) => {
 });
 
 // ============================================================
-// GMAIL STUBS
+// GMAIL STUBS (kept as-is)
 // ============================================================
 app.get('/api/admin/gmail/status', requireAdmin, (_req, res) => {
   res.json({
