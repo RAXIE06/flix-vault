@@ -1,11 +1,11 @@
 import React from 'react';
-import { Film, Sparkles, Lock, Megaphone } from 'lucide-react';
+import { Film, Sparkles, Lock, Megaphone, Package } from 'lucide-react';
 
 interface HeaderProps {
   hasSecondaryMovies: boolean;
   onNavigate: (sectionId: string) => void;
   onOpenAdminAccess?: () => void;
-  /** Optional announcement text. If not provided, defaults to welcome message. */
+  onOpenMyOrders?: () => void;
   announcementText?: string;
 }
 
@@ -13,6 +13,7 @@ export const Header: React.FC<HeaderProps> = ({
   hasSecondaryMovies,
   onNavigate,
   onOpenAdminAccess,
+  onOpenMyOrders,
   announcementText,
 }) => {
   const defaultNotice =
@@ -21,9 +22,7 @@ export const Header: React.FC<HeaderProps> = ({
 
   return (
     <>
-      {/* ============================================================ */}
-      {/* ANNOUNCEMENT MARQUEE — Top of the page                     */}
-      {/* ============================================================ */}
+      {/* ANNOUNCEMENT MARQUEE */}
       <div className="w-full bg-gradient-to-r from-purple-900 via-purple-700 to-purple-900 overflow-hidden border-b border-purple-500/30 relative">
         <div className="relative flex items-center h-9">
           <style>{`
@@ -52,14 +51,12 @@ export const Header: React.FC<HeaderProps> = ({
         </div>
       </div>
 
-      {/* ============================================================ */}
-      {/* MAIN HEADER                                                 */}
-      {/* ============================================================ */}
+      {/* MAIN HEADER */}
       <header className="sticky top-0 z-40 w-full bg-[#08070d]/95 backdrop-blur-md border-b border-purple-950/40">
         <div className="max-w-5xl mx-auto px-4 sm:px-6">
           <div className="flex items-center justify-between h-14 sm:h-16">
             
-            {/* FlixVault Logo */}
+            {/* Logo */}
             <button
               onClick={() => onNavigate('featured-showcase')}
               className="flex items-center gap-2.5 text-left group focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-purple-500 rounded-md py-1 cursor-pointer"
@@ -73,24 +70,38 @@ export const Header: React.FC<HeaderProps> = ({
               </span>
             </button>
 
-            {/* Minimal Navigation */}
-            <div className="flex items-center gap-2.5 sm:gap-4 text-xs font-medium">
+            {/* Navigation */}
+            <div className="flex items-center gap-2 sm:gap-3 text-xs font-medium">
               <button
                 onClick={() => onNavigate('featured-showcase')}
-                className="text-zinc-300 hover:text-white transition-colors cursor-pointer"
+                className="text-zinc-300 hover:text-white transition-colors cursor-pointer hidden xs:inline"
               >
                 Featured
               </button>
+
               {hasSecondaryMovies && (
                 <button
                   onClick={() => onNavigate('secondary-collection')}
-                  className="text-zinc-400 hover:text-purple-300 transition-colors cursor-pointer"
+                  className="text-zinc-400 hover:text-purple-300 transition-colors cursor-pointer hidden xs:inline"
                 >
                   Collection
                 </button>
               )}
-              
-              <span className="hidden xs:inline-flex items-center gap-1 px-2 py-0.5 rounded text-[10px] font-mono tracking-wider bg-purple-950/80 border border-purple-800/40 text-purple-300">
+
+              {/* My Orders */}
+              {onOpenMyOrders && (
+                <button
+                  onClick={onOpenMyOrders}
+                  className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md text-zinc-300 hover:text-white hover:bg-purple-950/40 border border-purple-950/40 hover:border-purple-800/60 transition-all cursor-pointer font-medium text-xs"
+                  title="View my purchased movies"
+                  aria-label="View my purchases"
+                >
+                  <Package className="w-3 h-3 text-purple-400" />
+                  <span>My Orders</span>
+                </button>
+              )}
+
+              <span className="hidden lg:inline-flex items-center gap-1 px-2 py-0.5 rounded text-[10px] font-mono tracking-wider bg-purple-950/80 border border-purple-800/40 text-purple-300">
                 <Sparkles className="w-2.5 h-2.5 text-purple-400" />
                 <span>4K MASTER</span>
               </span>
@@ -103,7 +114,7 @@ export const Header: React.FC<HeaderProps> = ({
                   aria-label="Open Admin Access Portal"
                 >
                   <Lock className="w-3 h-3 text-purple-400" />
-                  <span>Admin</span>
+                  <span className="hidden sm:inline">Admin</span>
                 </button>
               )}
             </div>
