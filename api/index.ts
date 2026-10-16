@@ -614,6 +614,28 @@ app.get('/api/movies', async (_req, res) => {
   }
 });
 
+// ============================================================
+// LANGUAGES — Available options
+// ============================================================
+const AVAILABLE_LANGUAGES = [
+  'Hindi', 'English', 'Tamil', 'Telugu', 'Malayalam', 'Kannada',
+  'Bengali', 'Marathi', 'Punjabi', 'Gujarati', 'Bhojpuri', 'Urdu',
+];
+
+const AVAILABLE_ASPECT_RATIOS = [
+  { value: '2:3', label: '2:3 — Classic Movie Poster (Vertical)' },
+  { value: '16:9', label: '16:9 — Cinematic Widescreen' },
+  { value: '1:1', label: '1:1 — Square (Instagram Style)' },
+  { value: '4:5', label: '4:5 — Portrait (Mobile Optimized)' },
+];
+
+app.get('/api/languages', (_req, res) => {
+  res.json({
+    languages: AVAILABLE_LANGUAGES,
+    aspectRatios: AVAILABLE_ASPECT_RATIOS,
+  });
+});
+
 app.get('/api/settings', async (_req, res) => {
   try {
     await connectDB();
