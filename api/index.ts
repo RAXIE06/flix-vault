@@ -1,4 +1,4 @@
-// api/index.ts — Full Backend (MongoDB + Telegram + Gmail IMAP)
+// api/index.ts — Full Backend (MongoDB + Telegram + Gmail IMAP + Auto-Verify)
 import express from 'express';
 import cookieParser from 'cookie-parser';
 import dotenv from 'dotenv';
@@ -18,17 +18,14 @@ if (!cached) {
 }
 
 async function connectDB() {
-  // Already connected
   if (cached.conn && mongoose.connection.readyState === 1) {
     return cached.conn;
   }
 
-  // Connection in progress — wait for it
   if (cached.promise) {
     try {
       cached.conn = await cached.promise;
       if (mongoose.connection.readyState === 1) return cached.conn;
-      // If resolved but not connected, retry
       cached.promise = null;
     } catch {
       cached.promise = null;
@@ -63,7 +60,6 @@ async function connectDB() {
   }
 }
 
-// Initial connection attempt on cold start (non-blocking)
 connectDB().catch((e) => console.error('[DB] Initial connect failed:', e.message));
 
 // ============================================================
@@ -541,19 +537,40 @@ async function runPaymentVerificationScan(limit: number = 20) {
 }
 
 // ============================================================
-// HEALTH — waits for DB connection (with timeout)
+// AUTO-VERIFY: Background Payment Scan Trigger
+// ============================================================
+let lastGlobalScan = 0;
+const GLOBAL_SCAN_THROTTLE_MS = 25 * 1000;
+
+function triggerBackgroundVerify() {
+  const now = Date.now();
+  if (now - lastGlobalScan < GLOBAL_SCAN_THROTTLE_MS) {
+    return;
+  }
+  lastGlobalScan = now;
+
+  runPaymentVerificationScan(30)
+    .then((result) => {
+      if (result.ordersVerifiedCount > 0) {
+        console.log(`[AUTO-VERIFY] Auto-verified ${result.ordersVerifiedCount} order(s)`);
+      }
+    })
+    .catch((err) => {
+      console.error('[AUTO-VERIFY] Background scan failed:', err?.message || err);
+    });
+}
+
+// ============================================================
+// HEALTH
 // ============================================================
 app.get('/api/health', async (_req, res) => {
-  // Try to establish connection if not already connected
   if (mongoose.connection.readyState !== 1) {
     try {
       await Promise.race([
         connectDB(),
         new Promise((_, reject) => setTimeout(() => reject(new Error('timeout')), 6000)),
       ]);
-    } catch {
-      // Ignore — we'll report the actual state below
-    }
+    } catch {}
   }
 
   res.json({
@@ -568,6 +585,9 @@ app.get('/api/health', async (_req, res) => {
     },
     gmail: {
       configured: isGmailConfigured(),
+    },
+    cron: {
+      configured: !!process.env.CRON_SECRET,
     },
     timestamp: new Date().toISOString(),
   });
@@ -618,7 +638,7 @@ app.get('/api/movies/:id/poster', async (req, res) => {
 });
 
 // ============================================================
-// ORDER ROUTES (Pay-Per-Movie UPI + Telegram)
+// ORDER ROUTES (with Auto-Verify trigger)
 // ============================================================
 app.post('/api/orders/create', async (req, res) => {
   try {
@@ -703,10 +723,55 @@ app.get('/api/orders/:orderId', async (req, res) => {
       delete orderObj.telegramInviteLink;
     }
 
+    // 🔥 AUTO-VERIFY: If order is still pending, trigger background Gmail scan
+    if (orderObj.status === 'pending') {
+      triggerBackgroundVerify();
+    }
+
     res.json(orderObj);
   } catch (err: any) {
     res.status(500).json({ error: 'Failed to load order' });
   }
+});
+
+// ============================================================
+// EXTERNAL CRON ENDPOINT — Auto Verify (from cron-job.org)
+// ============================================================
+app.all('/api/cron/verify-payments', async (req, res) => {
+  const secretFromQuery = req.query.secret;
+  const secretFromHeader = req.headers['x-cron-secret'];
+  const providedSecret = secretFromQuery || secretFromHeader;
+  const expectedSecret = process.env.CRON_SECRET;
+
+  if (!expectedSecret) {
+    return res.status(500).json({ error: 'CRON_SECRET not configured on server' });
+  }
+
+  if (providedSecret !== expectedSecret) {
+    return res.status(401).json({ error: 'Unauthorized — invalid cron secret' });
+  }
+
+  try {
+    console.log('[CRON] Triggered by external service');
+    const result = await runPaymentVerificationScan(30);
+    res.json({
+      success: true,
+      ...result,
+      triggeredBy: 'external-cron',
+      triggeredAt: new Date().toISOString(),
+    });
+  } catch (err: any) {
+    console.error('[CRON] Verify failed:', err.message);
+    res.status(500).json({
+      success: false,
+      error: err.message,
+      triggeredBy: 'external-cron',
+    });
+  }
+});
+
+app.get('/api/cron/ping', (_req, res) => {
+  res.json({ status: 'ok', timestamp: new Date().toISOString() });
 });
 
 // ============================================================
@@ -1006,7 +1071,6 @@ app.get('/api/admin/orders', requireAdmin, async (_req, res) => {
   }
 });
 
-// ADMIN: Manual verify an order
 app.post('/api/admin/orders/:orderId/verify-manual', requireAdmin, async (req, res) => {
   try {
     await connectDB();
@@ -1047,7 +1111,6 @@ app.post('/api/admin/orders/:orderId/verify-manual', requireAdmin, async (req, r
   }
 });
 
-// ADMIN: Get Telegram invite link for a specific order
 app.get('/api/admin/orders/:orderId/telegram-link', requireAdmin, async (req, res) => {
   try {
     await connectDB();
@@ -1066,7 +1129,6 @@ app.get('/api/admin/orders/:orderId/telegram-link', requireAdmin, async (req, re
   }
 });
 
-// ADMIN: Generate Telegram link for an existing order (on demand)
 app.post('/api/admin/orders/:orderId/generate-telegram-link', requireAdmin, async (req, res) => {
   try {
     await connectDB();
@@ -1098,7 +1160,7 @@ app.post('/api/admin/orders/:orderId/generate-telegram-link', requireAdmin, asyn
 });
 
 // ============================================================
-// AUTO PAYMENT VERIFICATION (Gmail IMAP + FamApp)
+// AUTO PAYMENT VERIFICATION (Manual trigger from admin panel)
 // ============================================================
 app.post('/api/admin/orders/verify-payments', requireAdmin, async (req, res) => {
   try {
@@ -1166,7 +1228,7 @@ app.put('/api/admin/upi-config', requireAdmin, async (req, res) => {
 });
 
 // ============================================================
-// GMAIL ROUTES (REAL — using IMAP)
+// GMAIL ROUTES
 // ============================================================
 app.get('/api/admin/gmail/status', requireAdmin, (_req, res) => {
   const config = getGmailConfig();
@@ -1194,7 +1256,6 @@ app.post('/api/admin/gmail/test-connection', requireAdmin, async (_req, res) => 
   }
 });
 
-// Fetch recent emails (safe — no body, just headers)
 app.get('/api/admin/gmail/recent-alerts', requireAdmin, async (req, res) => {
   try {
     const limit = parseInt((req.query.limit as string) || '10', 10);
@@ -1227,7 +1288,6 @@ app.get('/api/admin/gmail/recent-alerts', requireAdmin, async (req, res) => {
   }
 });
 
-// Diagnostic parser (test email parsing)
 app.post('/api/admin/gmail/diagnose-parser', requireAdmin, (req, res) => {
   try {
     const { from, subject, text } = req.body || {};
