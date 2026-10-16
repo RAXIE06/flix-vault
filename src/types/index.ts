@@ -15,6 +15,8 @@ export interface Movie {
   accessLabel: string; // e.g. "Pay per Movie · ₹149"
   resolution: '4K HDR' | '4K IMAX' | '1080p HD';
   audio: 'Dolby Atmos' | '5.1 Surround';
+  languages?: string[]; // Multiple languages (Hindi, English, Tamil, etc.)
+  posterAspectRatio?: '2:3' | '16:9' | '1:1' | '4:5'; // Poster display aspect ratio
   isFeatured?: boolean;
   isEnabled?: boolean; // Controls whether this movie is published to the public storefront
   telegramChannelId?: string; // Associated private Telegram delivery channel ID / handle
@@ -61,6 +63,7 @@ export interface UpiPaymentOrder {
   currency: 'INR';
   status: 'pending' | 'verified' | 'expired' | 'failed' | 'needs_review';
   telegramChannelId?: string;
+  telegramInviteLink?: string;
   upiVpa: string;
   upiPayeeName: string;
   upiPaymentUri: string;
@@ -202,4 +205,54 @@ export interface DiagnosticEmailSummary {
   parseConfidence: string;
   isVerifiedSender: boolean;
   limitations: string[];
+}
+
+// ============================================================
+// BATCH 2 ADDITIONS — Languages & Aspect Ratios
+// ============================================================
+
+export interface AvailableLanguagesResponse {
+  languages: string[];
+  aspectRatios: Array<{ value: string; label: string }>;
+}
+
+// ============================================================
+// BATCH 3 ADDITIONS — Analytics
+// ============================================================
+
+export interface MovieAnalytics {
+  movieId: string;
+  movieTitle: string;
+  totalOrders: number;
+  verifiedOrders: number;
+  pendingOrders: number;
+  expiredOrders: number;
+  totalRevenue: number;         // Sum of verified order amounts
+  uniqueBuyers: number;         // Unique UTR count for this movie
+}
+
+export interface AnalyticsSummary {
+  totalRevenue: number;
+  totalOrders: number;
+  totalVerifiedOrders: number;
+  totalPendingOrders: number;
+  totalExpiredOrders: number;
+  perMovie: MovieAnalytics[];
+  lastUpdated: string;
+}
+
+// ============================================================
+// BATCH 3 ADDITIONS — Order Recovery
+// ============================================================
+
+export interface UserOrderRecord {
+  orderId: string;
+  movieId: string;
+  movieTitle: string;
+  payableAmount: number;
+  status: 'pending' | 'verified' | 'expired' | 'failed' | 'needs_review';
+  telegramInviteLink?: string;
+  verifiedAt?: string;
+  createdAt: string;
+  savedAt: number; // Client-side timestamp when saved to localStorage
 }
