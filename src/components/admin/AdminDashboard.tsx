@@ -22,6 +22,7 @@ import {
   HelpCircle,
   ShieldCheck,
   LogOut,
+  BarChart3,
 } from 'lucide-react';
 import {
   Movie,
@@ -36,6 +37,7 @@ import { DeleteConfirmModal } from './DeleteConfirmModal';
 import { MobilePreviewModal } from './MobilePreviewModal';
 import { TelegramConfigSection } from './TelegramConfigSection';
 import { GmailVerificationSection } from './GmailVerificationSection';
+import { AdminAnalyticsTab } from './AdminAnalyticsTab';
 import { api } from '../../services/api';
 
 interface AdminDashboardProps {
@@ -63,7 +65,9 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
   onExit,
   onLogout,
 }) => {
-  const [activeTab, setActiveTab] = useState<'movies' | 'storefront' | 'upi' | 'telegram' | 'gmail'>('movies');
+  const [activeTab, setActiveTab] = useState<
+    'analytics' | 'movies' | 'storefront' | 'upi' | 'telegram' | 'gmail'
+  >('movies');
 
   const [editModalOpen, setEditModalOpen] = useState(false);
   const [editingMovie, setEditingMovie] = useState<Movie | null>(null);
@@ -164,7 +168,8 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
   };
 
   const [verifyingPayments, setVerifyingPayments] = useState(false);
-  const [verificationSummary, setVerificationSummary] = useState<PaymentVerificationScanResponse | null>(null);
+  const [verificationSummary, setVerificationSummary] =
+    useState<PaymentVerificationScanResponse | null>(null);
 
   const handleVerifyPayments = async () => {
     setVerifyingPayments(true);
@@ -326,9 +331,6 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                   Cloud hosting containers use dynamic outbound IPs. To connect FlixVault to your MongoDB Atlas cluster:
                   in MongoDB Atlas, navigate to <strong className="text-white">Network Access</strong> &rarr; <strong className="text-white">IP Access List</strong> &rarr; <strong className="text-white">Add IP Address</strong> &rarr; select <strong className="text-white">Allow Access from Anywhere (0.0.0.0/0)</strong>.
                 </p>
-                <p className="text-[11px] text-amber-400/80">
-                  Note: While connecting, FlixVault operates seamlessly on its fallback store so storefront, movies, and UPI checkout remain active.
-                </p>
               </div>
             </div>
             <button
@@ -345,6 +347,17 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
         {/* Navigation Tabs */}
         <div className="flex flex-col sm:flex-row items-stretch sm:items-center justify-between border-b border-purple-950/60 pb-4 gap-3">
           <div className="flex items-center gap-1.5 bg-[#120d20] p-1 rounded-xl border border-purple-950/50 overflow-x-auto">
+            <button
+              onClick={() => setActiveTab('analytics')}
+              className={`px-3.5 py-2 rounded-lg text-xs font-semibold flex items-center gap-2 transition-all cursor-pointer whitespace-nowrap ${
+                activeTab === 'analytics'
+                  ? 'bg-purple-600 text-white shadow-sm'
+                  : 'text-zinc-400 hover:text-white'
+              }`}
+            >
+              <BarChart3 className="w-3.5 h-3.5" />
+              <span>Analytics</span>
+            </button>
             <button
               onClick={() => setActiveTab('movies')}
               className={`px-3.5 py-2 rounded-lg text-xs font-semibold flex items-center gap-2 transition-all cursor-pointer whitespace-nowrap ${
@@ -412,6 +425,9 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
             </button>
           )}
         </div>
+
+        {/* SECTION 0: ANALYTICS (NEW) */}
+        {activeTab === 'analytics' && <AdminAnalyticsTab />}
 
         {/* SECTION 1: MOVIE MANAGEMENT */}
         {activeTab === 'movies' && (
@@ -561,7 +577,6 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
         {activeTab === 'storefront' && (
           <div className="space-y-6">
             
-            {/* Storefront Overview Card */}
             <div className="p-5 sm:p-6 rounded-2xl bg-[#0e0a19] border border-purple-950/60 shadow-lg space-y-4">
               <h3 className="font-bold text-white text-base font-['Outfit']">
                 Storefront Overview
@@ -600,7 +615,6 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
               </div>
             </div>
 
-            {/* Choose Hero Movie Section */}
             <div className="p-5 sm:p-6 rounded-2xl bg-[#0e0a19] border border-purple-950/60 shadow-lg space-y-4">
               <div>
                 <h3 className="font-bold text-white text-base font-['Outfit']">
@@ -725,7 +739,6 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
               </form>
             </div>
 
-            {/* UPI Orders Table */}
             <div className="p-5 sm:p-6 rounded-2xl bg-[#0e0a19] border border-purple-950/60 shadow-lg space-y-4">
               <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
                 <div>
@@ -910,9 +923,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
         )}
 
         {/* SECTION 5: GMAIL IMAP VERIFICATION */}
-        {activeTab === 'gmail' && (
-          <GmailVerificationSection />
-        )}
+        {activeTab === 'gmail' && <GmailVerificationSection />}
 
       </main>
 
