@@ -122,6 +122,7 @@ const SettingsSchema = new mongoose.Schema({
   key: { type: String, unique: true, default: 'global' },
   telegramConfig: mongoose.Schema.Types.Mixed,
   upiConfig: mongoose.Schema.Types.Mixed,
+  announcement: mongoose.Schema.Types.Mixed,
   featuredMovieId: String,
   storefrontMaxTitles: Number,
 }, { timestamps: true, strict: false });
@@ -432,7 +433,6 @@ async function runPaymentVerificationScan(limit: number = 20) {
   let duplicatesRejectedCount = 0;
 
   try {
-    // 🔥 CRITICAL: Ensure DB is connected before querying
     await connectDB();
 
     if (!isGmailConfigured()) {
@@ -553,7 +553,6 @@ function triggerBackgroundVerify() {
   }
   lastGlobalScan = now;
 
-  // 🔥 connectDB() is called inside runPaymentVerificationScan now
   runPaymentVerificationScan(30)
     .then((result) => {
       if (result.ordersVerifiedCount > 0) {
@@ -647,6 +646,28 @@ app.get('/api/settings', async (_req, res) => {
   }
 });
 
+// ============================================================
+// ANNOUNCEMENT — Public read
+// ============================================================
+app.get('/api/settings/announcement', async (_req, res) => {
+  try {
+    await connectDB();
+    const settings = await SettingsModel.findOne({ key: 'global' }).lean();
+    const announcement = (settings as any)?.announcement;
+    res.json({
+      success: true,
+      text: announcement?.text || '📢 Welcome to FlixVault — Buy any movie for just ₹19! Instant Telegram delivery. Support: @Owner_helpbot',
+      enabled: announcement?.enabled !== false,
+    });
+  } catch (err: any) {
+    res.json({
+      success: true,
+      text: '📢 Welcome to FlixVault — Instant Telegram delivery. Support: @Owner_helpbot',
+      enabled: true,
+    });
+  }
+});
+
 app.get('/api/movies/:id/poster', async (req, res) => {
   try {
     await connectDB();
@@ -665,7 +686,7 @@ app.get('/api/movies/:id/poster', async (req, res) => {
 });
 
 // ============================================================
-// ORDER ROUTES (with Auto-Verify trigger)
+// ORDER ROUTES (with Auto-Verify trigger + clean UPI URI)
 // ============================================================
 app.post('/api/orders/create', async (req, res) => {
   try {
@@ -694,7 +715,11 @@ app.post('/api/orders/create', async (req, res) => {
     const expiresAt = new Date(Date.now() + 5 * 60 * 1000);
 
     const amountStr = payableAmount.toFixed(2);
-    const upiString = `upi://pay?pa=${encodeURIComponent(upiVpa)}&pn=${encodeURIComponent(payeeName)}&am=${amountStr}&cu=INR&tn=${encodeURIComponent(orderId)}`;
+    // ✅ Clean UPI URI — no special chars, spaces replaced with underscores
+    const cleanPayeeName = payeeName.trim().replace(/\s+/g, '_');
+    const cleanVpa = upiVpa.trim();
+    const cleanOrderId = orderId.replace(/[^A-Za-z0-9-]/g, '');
+    const upiString = `upi://pay?pa=${cleanVpa}&pn=${cleanPayeeName}&am=${amountStr}&cu=INR&tn=${cleanOrderId}`;
 
     let telegramInviteLink: string | undefined;
     if (movie.telegramChannelId) {
@@ -714,11 +739,11 @@ app.post('/api/orders/create', async (req, res) => {
       discountAmount: discountRupees,
       status: 'pending',
       expiresAt,
-      upiVpa,
-      payeeName,
+      upiVpa: cleanVpa,
+      payeeName: cleanPayeeName,
       qrString: upiString,
       upiPaymentUri: upiString,
-      upiPayeeName: payeeName,
+      upiPayeeName: cleanPayeeName,
       telegramInviteLink,
       telegramInviteGeneratedAt: telegramInviteLink ? new Date() : undefined,
     });
@@ -750,7 +775,6 @@ app.get('/api/orders/:orderId', async (req, res) => {
       delete orderObj.telegramInviteLink;
     }
 
-    // 🔥 AUTO-VERIFY: If order is still pending, trigger background Gmail scan
     if (orderObj.status === 'pending') {
       triggerBackgroundVerify();
     }
@@ -762,7 +786,7 @@ app.get('/api/orders/:orderId', async (req, res) => {
 });
 
 // ============================================================
-// ORDER RECOVERY — Find orders by Order IDs (for user recovery)
+// ORDER RECOVERY
 // ============================================================
 app.post('/api/orders/recover', async (req, res) => {
   try {
@@ -773,14 +797,12 @@ app.post('/api/orders/recover', async (req, res) => {
       return res.status(400).json({ error: 'orderIds array is required' });
     }
 
-    // Limit to prevent abuse
     const limitedIds = orderIds.slice(0, 20);
 
     const orders = await OrderModel.find({
       orderId: { $in: limitedIds },
     }).lean();
 
-    // Sanitize: expose telegram link only for verified orders
     const sanitized = orders.map((o: any) => {
       const obj: any = { ...o };
       obj.upiPaymentUri = obj.upiPaymentUri || obj.qrString;
@@ -799,7 +821,7 @@ app.post('/api/orders/recover', async (req, res) => {
 });
 
 // ============================================================
-// EXTERNAL CRON ENDPOINT — Auto Verify (from cron-job.org)
+// EXTERNAL CRON ENDPOINT
 // ============================================================
 app.all('/api/cron/verify-payments', async (req, res) => {
   const secretFromQuery = req.query.secret;
@@ -817,7 +839,6 @@ app.all('/api/cron/verify-payments', async (req, res) => {
 
   try {
     console.log('[CRON] Triggered by external service');
-    // runPaymentVerificationScan now awaits connectDB() internally
     const result = await runPaymentVerificationScan(30);
     res.json({
       success: true,
@@ -1114,6 +1135,34 @@ app.put('/api/admin/settings', requireAdmin, async (req, res) => {
 });
 
 // ============================================================
+// ADMIN ANNOUNCEMENT — save
+// ============================================================
+app.put('/api/admin/settings/announcement', requireAdmin, async (req, res) => {
+  try {
+    await connectDB();
+    const { text, enabled } = req.body || {};
+    if (typeof text !== 'string' || !text.trim()) {
+      return res.status(400).json({ error: 'Announcement text is required' });
+    }
+    const settings = await SettingsModel.findOneAndUpdate(
+      { key: 'global' },
+      {
+        $set: {
+          'announcement.text': String(text).trim().slice(0, 250),
+          'announcement.enabled': enabled !== false,
+          'announcement.updatedAt': new Date(),
+        },
+      },
+      { upsert: true, new: true }
+    );
+    res.json({ success: true, announcement: (settings as any)?.announcement });
+  } catch (err: any) {
+    console.error('[ANNOUNCEMENT SAVE]', err.message);
+    res.status(500).json({ error: 'Failed to save announcement' });
+  }
+});
+
+// ============================================================
 // ADMIN ORDERS
 // ============================================================
 app.get('/api/admin/orders', requireAdmin, async (_req, res) => {
@@ -1226,16 +1275,26 @@ app.post('/api/admin/orders/:orderId/generate-telegram-link', requireAdmin, asyn
 });
 
 // ============================================================
-// ADMIN ANALYTICS — Per Movie Sales + Earnings
+// ADMIN ANALYTICS — Per Movie Sales + Earnings (with live titles)
 // ============================================================
 app.get('/api/admin/analytics', requireAdmin, async (_req, res) => {
   try {
     await connectDB();
 
-    // Fetch all orders
     const allOrders = await OrderModel.find({}).lean();
 
-    // Group by movieId
+    // Fetch current movie titles (not snapshots)
+    const uniqueMovieIds = Array.from(
+      new Set(allOrders.map((o: any) => o.movieId).filter(Boolean))
+    ) as string[];
+    const currentMovies = await MovieModel.find({
+      id: { $in: uniqueMovieIds },
+    }).lean();
+    const movieTitleMap: Record<string, string> = {};
+    currentMovies.forEach((m: any) => {
+      movieTitleMap[m.id] = m.title;
+    });
+
     const movieMap: Record<string, any> = {};
 
     for (const order of allOrders) {
@@ -1243,7 +1302,7 @@ app.get('/api/admin/analytics', requireAdmin, async (_req, res) => {
       if (!movieMap[mId]) {
         movieMap[mId] = {
           movieId: mId,
-          movieTitle: order.movieTitle || 'Unknown',
+          movieTitle: movieTitleMap[mId] || order.movieTitle || 'Unknown',
           totalOrders: 0,
           verifiedOrders: 0,
           pendingOrders: 0,
@@ -1268,7 +1327,6 @@ app.get('/api/admin/analytics', requireAdmin, async (_req, res) => {
       }
     }
 
-    // Convert Sets to numbers
     const perMovie = Object.values(movieMap).map((m: any) => ({
       movieId: m.movieId,
       movieTitle: m.movieTitle,
@@ -1280,10 +1338,8 @@ app.get('/api/admin/analytics', requireAdmin, async (_req, res) => {
       uniqueBuyers: m.uniqueBuyers.size,
     }));
 
-    // Sort by revenue descending
     perMovie.sort((a: any, b: any) => b.totalRevenue - a.totalRevenue);
 
-    // Global totals
     const summary = {
       totalRevenue: perMovie.reduce((sum: number, m: any) => sum + m.totalRevenue, 0),
       totalOrders: allOrders.length,
