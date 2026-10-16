@@ -106,6 +106,8 @@ const MovieSchema = new mongoose.Schema({
   isFeatured: { type: Boolean, default: false },
   isEnabled: { type: Boolean, default: true },
   telegramChannelId: String,
+  languages: [String],
+  posterAspectRatio: String,
   artwork: mongoose.Schema.Types.Mixed,
   posterStorageId: String,
   customPosterUrl: String,
