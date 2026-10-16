@@ -1,20 +1,21 @@
 import React from 'react';
-import { Film, Lock, MessageCircle } from 'lucide-react';
+import { Film, Lock, MessageCircle, Package } from 'lucide-react';
 import { InfoModalContent } from '../types';
 
 interface FooterProps {
   onOpenInfo: (info: InfoModalContent) => void;
   onOpenAdminAccess: () => void;
+  onOpenMyOrders?: () => void;
 }
 
-export const Footer: React.FC<FooterProps> = ({ onOpenInfo, onOpenAdminAccess }) => {
+export const Footer: React.FC<FooterProps> = ({ onOpenInfo, onOpenAdminAccess, onOpenMyOrders }) => {
   return (
     <footer className="w-full bg-[#06050a] border-t border-purple-950/40 text-zinc-400 text-xs">
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-12 lg:py-16">
         
         <div className="grid grid-cols-1 md:grid-cols-12 gap-8 lg:gap-12 pb-10 border-b border-purple-950/40">
           
-          {/* Brand Column */}
+          {/* Brand */}
           <div className="md:col-span-5 space-y-3">
             <div className="flex items-center gap-2.5">
               <div className="w-8 h-8 rounded-lg bg-gradient-to-br from-purple-600 to-violet-900 flex items-center justify-center shadow-md">
@@ -32,10 +33,10 @@ export const Footer: React.FC<FooterProps> = ({ onOpenInfo, onOpenAdminAccess })
             </div>
           </div>
 
-          {/* Quick Navigation / Legal / Support Columns */}
-          <div className="md:col-span-7 grid grid-cols-2 sm:grid-cols-4 gap-6">
+          {/* Columns */}
+          <div className="md:col-span-7 grid grid-cols-2 sm:grid-cols-5 gap-6">
             
-            {/* Catalog Links */}
+            {/* Catalog */}
             <div>
               <h4 className="font-semibold text-white uppercase tracking-wider text-[11px] mb-3 font-mono">
                 Catalog
@@ -54,7 +55,7 @@ export const Footer: React.FC<FooterProps> = ({ onOpenInfo, onOpenAdminAccess })
               </ul>
             </div>
 
-            {/* Platform Information */}
+            {/* Platform */}
             <div>
               <h4 className="font-semibold text-white uppercase tracking-wider text-[11px] mb-3 font-mono">
                 Platform
@@ -78,6 +79,26 @@ export const Footer: React.FC<FooterProps> = ({ onOpenInfo, onOpenAdminAccess })
                 </li>
               </ul>
             </div>
+
+            {/* My Orders */}
+            {onOpenMyOrders && (
+              <div>
+                <h4 className="font-semibold text-white uppercase tracking-wider text-[11px] mb-3 font-mono">
+                  My Account
+                </h4>
+                <ul className="space-y-2">
+                  <li>
+                    <button
+                      onClick={onOpenMyOrders}
+                      className="hover:text-purple-300 transition-colors text-left cursor-pointer flex items-center gap-1.5"
+                    >
+                      <Package className="w-3.5 h-3.5 text-purple-400" />
+                      <span>My Orders</span>
+                    </button>
+                  </li>
+                </ul>
+              </div>
+            )}
 
             {/* Legal */}
             <div>
@@ -118,7 +139,7 @@ export const Footer: React.FC<FooterProps> = ({ onOpenInfo, onOpenAdminAccess })
                     className="hover:text-purple-300 transition-colors flex items-center gap-1.5 group"
                   >
                     <MessageCircle className="w-3.5 h-3.5 text-purple-400 group-hover:text-purple-300 transition-colors" />
-                    <span>Need Help? Chat with us</span>
+                    <span>Need Help? Chat</span>
                   </a>
                 </li>
                 <li className="text-zinc-500 text-[11px] font-mono pl-5">
@@ -141,7 +162,6 @@ export const Footer: React.FC<FooterProps> = ({ onOpenInfo, onOpenAdminAccess })
             <span>Secure UPI Payments · Instant Delivery</span>
             <span aria-hidden="true">·</span>
             
-            {/* Subtle Admin Access Button */}
             <button
               onClick={onOpenAdminAccess}
               className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md text-zinc-400 hover:text-purple-300 hover:bg-purple-950/40 border border-purple-950/40 hover:border-purple-800/60 transition-all cursor-pointer font-medium"
