@@ -12,6 +12,7 @@ import {
   Code2,
   AlertCircle,
   Send,
+  Clock,
 } from 'lucide-react';
 import QRCode from 'qrcode';
 import { Movie, UpiPaymentOrder } from '../types';
@@ -22,6 +23,8 @@ interface PurchaseModalProps {
   onClose: () => void;
 }
 
+const VERIFY_MAX_SECONDS = 120; // 2 minutes
+
 export const PurchaseModal: React.FC<PurchaseModalProps> = ({ movie, onClose }) => {
   const [order, setOrder] = useState<UpiPaymentOrder | null>(null);
   const [qrDataUrl, setQrDataUrl] = useState<string | null>(null);
@@ -31,6 +34,7 @@ export const PurchaseModal: React.FC<PurchaseModalProps> = ({ movie, onClose }) 
   const [copiedAmount, setCopiedAmount] = useState(false);
   const [copiedUri, setCopiedUri] = useState(false);
   const [showDiagnostics, setShowDiagnostics] = useState(false);
+  const [secondsElapsed, setSecondsElapsed] = useState(0);
 
   // Initial order creation
   useEffect(() => {
@@ -102,6 +106,24 @@ export const PurchaseModal: React.FC<PurchaseModalProps> = ({ movie, onClose }) 
     return () => clearInterval(interval);
   }, [order]);
 
+  // ============================================================
+  // TIMER — counts seconds elapsed since order creation
+  // ============================================================
+  useEffect(() => {
+    if (!order || order.status !== 'pending') return;
+
+    const startTime = new Date(order.createdAt || Date.now()).getTime();
+
+    const tick = () => {
+      const elapsed = Math.floor((Date.now() - startTime) / 1000);
+      setSecondsElapsed(Math.max(0, elapsed));
+    };
+
+    tick();
+    const interval = setInterval(tick, 1000);
+    return () => clearInterval(interval);
+  }, [order]);
+
   // ESC key handler
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
@@ -135,6 +157,28 @@ export const PurchaseModal: React.FC<PurchaseModalProps> = ({ movie, onClose }) 
       setCopiedUri(true);
       setTimeout(() => setCopiedUri(false), 2000);
     }
+  };
+
+  // Timer-derived values
+  const remaining = Math.max(0, VERIFY_MAX_SECONDS - secondsElapsed);
+  const mm = Math.floor(remaining / 60);
+  const ss = String(remaining % 60).padStart(2, '0');
+  const isTimedOut = remaining === 0;
+
+  const getTimerMessage = () => {
+    if (secondsElapsed < 15) {
+      return '💡 Payment करते ही link automatically यहाँ appear होगा। कृपया wait करें...';
+    }
+    if (secondsElapsed < 45) {
+      return '🔍 FamApp alert से payment match कर रहे हैं... Usually 30-60 seconds लगते हैं।';
+    }
+    if (secondsElapsed < 90) {
+      return '⏳ Almost there! आपका payment verify हो रहा है...';
+    }
+    if (secondsElapsed < 120) {
+      return '🔔 Final check चल रही है... Link कुछ seconds में आ जाएगा।';
+    }
+    return '✋ थोड़ा ज़्यादा time लग रहा है। अगर payment हो गया है तो link कुछ देर में आ जाएगा। Problem हो तो Support से बात करें।';
   };
 
   return (
@@ -297,9 +341,53 @@ export const PurchaseModal: React.FC<PurchaseModalProps> = ({ movie, onClose }) 
                     </a>
                   </div>
 
-                  <p className="text-[10px] text-zinc-500 mt-3 text-center">
-                    ⏱️ Waiting for payment... This page auto-refreshes every 8 seconds.
-                  </p>
+                  {/* ============================================================ */}
+                  {/* LIVE VERIFICATION TIMER (2 minutes countdown)               */}
+                  {/* ============================================================ */}
+                  <div
+                    className={`w-full mt-3 p-3.5 rounded-xl border space-y-2 transition-all ${
+                      isTimedOut
+                        ? 'bg-gradient-to-r from-amber-950/60 to-rose-950/40 border-amber-700/60'
+                        : 'bg-gradient-to-r from-purple-950/60 to-indigo-950/40 border-purple-800/50'
+                    }`}
+                  >
+                    <div className="flex items-center justify-between text-xs">
+                      <span className="text-purple-300 font-semibold flex items-center gap-1.5">
+                        {!isTimedOut ? (
+                          <>
+                            <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                            <span>Verifying Payment</span>
+                          </>
+                        ) : (
+                          <>
+                            <Clock className="w-3.5 h-3.5 text-amber-400" />
+                            <span className="text-amber-300">Still Verifying</span>
+                          </>
+                        )}
+                      </span>
+                      <span
+                        className={`font-mono font-bold tabular-nums ${
+                          isTimedOut ? 'text-amber-300' : 'text-purple-200'
+                        }`}
+                      >
+                        {isTimedOut ? 'Just a moment...' : `${mm}:${ss}`}
+                      </span>
+                    </div>
+                    <p className="text-[11px] text-zinc-300 leading-relaxed text-left">
+                      {getTimerMessage()}
+                    </p>
+                    {isTimedOut && (
+                      <a
+                        href="https://t.me/Owner_helpbot"
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="mt-1 inline-flex items-center gap-1 text-[11px] text-emerald-400 hover:text-emerald-300 font-medium"
+                      >
+                        <Send className="w-3 h-3" />
+                        <span>Chat with Support (@Owner_helpbot)</span>
+                      </a>
+                    )}
+                  </div>
                 </div>
 
                 {/* Diagnostics */}
@@ -327,7 +415,7 @@ export const PurchaseModal: React.FC<PurchaseModalProps> = ({ movie, onClose }) 
               </>
             )}
 
-            {/* Order verification details if verified but no telegram link yet */}
+            {/* Order verified but no telegram link yet */}
             {order.status === 'verified' && !order.telegramInviteLink && (
               <div className="p-4 rounded-xl bg-purple-950/40 border border-purple-800/60 text-center space-y-2">
                 <Check className="w-8 h-8 text-emerald-400 mx-auto" />
