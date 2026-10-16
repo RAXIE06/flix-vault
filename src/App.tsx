@@ -4,8 +4,6 @@ import {
   INITIAL_TELEGRAM_CONFIG,
   resolveFeaturedMovie,
   resolveSecondaryMovies,
-  CURATED_SHOWCASE_MOVIES,
-  ADDITIONAL_AVAILABLE_MOVIES,
 } from './data/movies';
 import { api } from './services/api';
 import { Header } from './components/Header';
@@ -18,18 +16,20 @@ import { AdminDashboard } from './components/admin/AdminDashboard';
 import { InfoModal } from './components/InfoModal';
 import { Footer } from './components/Footer';
 import { MyOrdersPage } from './components/MyOrdersPage';
+import { SplashScreen } from './components/SplashScreen';
 
-const LOCAL_FALLBACK_MOVIES: Movie[] = [
-  ...CURATED_SHOWCASE_MOVIES,
-  ...ADDITIONAL_AVAILABLE_MOVIES,
-];
+// ✅ Empty fallback — only real MongoDB movies will show
+const LOCAL_FALLBACK_MOVIES: Movie[] = [];
 
 export default function App() {
-  const [movies, setMovies] = useState<Movie[]>(LOCAL_FALLBACK_MOVIES);
-  const [adminMovies, setAdminMovies] = useState<Movie[]>(LOCAL_FALLBACK_MOVIES);
+  const [showSplash, setShowSplash] = useState(true);
+  const [movies, setMovies] = useState<Movie[]>([]);
+  const [adminMovies, setAdminMovies] = useState<Movie[]>([]);
   const [telegramConfig, setTelegramConfig] = useState<TelegramConfig>(INITIAL_TELEGRAM_CONFIG);
-  const [storageSource, setStorageSource] = useState<string>('local-sample');
-  const [dbStatus, setDbStatus] = useState<any>({ connected: false, fallback: true });
+  const [announcement, setAnnouncement] = useState<string | undefined>(undefined);
+  const [announcementEnabled, setAnnouncementEnabled] = useState(true);
+  const [storageSource, setStorageSource] = useState<string>('loading');
+  const [dbStatus, setDbStatus] = useState<any>(null);
 
   const [adminModalOpen, setAdminModalOpen] = useState(false);
   const [adminPanelOpen, setAdminPanelOpen] = useState(false);
@@ -40,16 +40,15 @@ export default function App() {
   const [infoModalContent, setInfoModalContent] = useState<InfoModalContent | null>(null);
 
   // ============================================================
-  // ROUTING — simple hash-based routing for /my-orders
+  // ROUTING — hash-based
   // ============================================================
-  const [currentRoute, setCurrentRoute] = useState<string>(() => {
-    return window.location.hash.replace('#', '') || '/';
-  });
+  const [currentRoute, setCurrentRoute] = useState<string>(() =>
+    window.location.hash.replace('#', '') || '/'
+  );
 
   useEffect(() => {
-    const handleHashChange = () => {
+    const handleHashChange = () =>
       setCurrentRoute(window.location.hash.replace('#', '') || '/');
-    };
     window.addEventListener('hashchange', handleHashChange);
     return () => window.removeEventListener('hashchange', handleHashChange);
   }, []);
@@ -59,26 +58,56 @@ export default function App() {
     window.scrollTo({ top: 0, behavior: 'smooth' });
   }, []);
 
-  // Silently try to load from server — fallback to local if fails
+  // ============================================================
+  // LOAD STOREFRONT — with retry logic for slow networks
+  // ============================================================
   const loadPublicStorefront = useCallback(async () => {
-    try {
-      const [moviesRes, healthRes] = await Promise.all([
-        api.getPublicMovies(),
-        api.checkHealth(),
-      ]);
+    const fetchWithRetry = async (attempt: number): Promise<any> => {
+      try {
+        const [moviesRes, healthRes] = await Promise.all([
+          api.getPublicMovies(),
+          api.checkHealth(),
+        ]);
+        return { moviesRes, healthRes };
+      } catch (err) {
+        if (attempt < 3) {
+          await new Promise((r) => setTimeout(r, 1500));
+          return fetchWithRetry(attempt + 1);
+        }
+        throw err;
+      }
+    };
 
-      if (moviesRes?.movies?.length > 0) {
-        setMovies(moviesRes.movies);
+    try {
+      const { moviesRes, healthRes } = await fetchWithRetry(1);
+
+      if (moviesRes?.movies) {
+        // Only replace if we got a valid array (empty arrays preserve current)
+        setMovies((prev) => (moviesRes.movies.length > 0 ? moviesRes.movies : prev));
         setStorageSource(moviesRes.storage || 'mongodb');
       }
-      if (healthRes?.database) {
-        setDbStatus(healthRes.database);
-      }
+      if (healthRes?.database) setDbStatus(healthRes.database);
     } catch (err: any) {
-      console.warn('[FlixVault] Server unavailable, using local showcase:', err?.message);
-      setMovies(LOCAL_FALLBACK_MOVIES);
-      setStorageSource('local-sample');
+      console.warn('[FlixVault] Server unavailable after retries');
+      // Only set fallback if we currently have no movies at all
+      setMovies((prev) => (prev.length > 0 ? prev : LOCAL_FALLBACK_MOVIES));
+      setStorageSource('offline');
       setDbStatus({ connected: false, fallback: true });
+    }
+  }, []);
+
+  // ============================================================
+  // LOAD ANNOUNCEMENT
+  // ============================================================
+  const loadAnnouncement = useCallback(async () => {
+    try {
+      const res = await fetch('/api/settings/announcement');
+      if (!res.ok) return;
+      const data = await res.json();
+      if (data.text) setAnnouncement(data.text);
+      setAnnouncementEnabled(data.enabled !== false);
+    } catch {
+      // Ignore — use default
     }
   }, []);
 
@@ -88,53 +117,41 @@ export default function App() {
         api.getAdminMovies(),
         api.getAdminSettings(),
       ]);
-
-      if (adminMoviesRes?.movies?.length > 0) {
-        setAdminMovies(adminMoviesRes.movies);
-      }
+      if (adminMoviesRes?.movies) setAdminMovies(adminMoviesRes.movies);
       if (settingsRes?.settings?.telegramConfig) {
         setTelegramConfig(settingsRes.settings.telegramConfig);
       }
     } catch (err) {
-      console.warn('[FlixVault] Admin data unavailable, using local:', err);
-      setAdminMovies(LOCAL_FALLBACK_MOVIES);
+      console.warn('[FlixVault] Admin data unavailable:', err);
     }
   }, []);
 
   useEffect(() => {
     loadPublicStorefront();
+    loadAnnouncement();
     api.checkAdminSession().then(setIsAdminAuthenticated).catch(() => {});
-  }, [loadPublicStorefront]);
+  }, [loadPublicStorefront, loadAnnouncement]);
 
   useEffect(() => {
-    if (adminPanelOpen) {
-      loadAdminData();
-    }
+    if (adminPanelOpen) loadAdminData();
   }, [adminPanelOpen, loadAdminData]);
 
-  const primaryFeaturedMovie = useMemo(() => {
-    return resolveFeaturedMovie(movies);
-  }, [movies]);
-
-  const secondaryMovies = useMemo(() => {
-    return resolveSecondaryMovies(movies, primaryFeaturedMovie?.id);
-  }, [movies, primaryFeaturedMovie]);
+  const primaryFeaturedMovie = useMemo(() => resolveFeaturedMovie(movies), [movies]);
+  const secondaryMovies = useMemo(
+    () => resolveSecondaryMovies(movies, primaryFeaturedMovie?.id),
+    [movies, primaryFeaturedMovie]
+  );
 
   const handleNavigate = useCallback(
     (sectionId: string) => {
-      // If we're on /my-orders, go home first
       if (currentRoute === '/my-orders') {
         navigateTo('/');
         setTimeout(() => {
-          const element = document.getElementById(sectionId);
-          if (element) element.scrollIntoView({ behavior: 'smooth' });
+          document.getElementById(sectionId)?.scrollIntoView({ behavior: 'smooth' });
         }, 200);
         return;
       }
-      const element = document.getElementById(sectionId);
-      if (element) {
-        element.scrollIntoView({ behavior: 'smooth' });
-      }
+      document.getElementById(sectionId)?.scrollIntoView({ behavior: 'smooth' });
     },
     [currentRoute, navigateTo]
   );
@@ -201,15 +218,19 @@ export default function App() {
     }
   };
 
+  // ✅ When admin saves announcement, update local state instantly
+  const handleAnnouncementSaved = (text: string, enabled: boolean) => {
+    setAnnouncement(text);
+    setAnnouncementEnabled(enabled);
+  };
+
   const handleAdminAuthenticated = () => {
     setIsAdminAuthenticated(true);
     setAdminModalOpen(false);
     setAdminPanelOpen(true);
   };
 
-  const handleOpenAdminAccess = useCallback(() => {
-    setAdminModalOpen(true);
-  }, []);
+  const handleOpenAdminAccess = useCallback(() => setAdminModalOpen(true), []);
 
   const handleAdminLogout = async () => {
     try {
@@ -221,7 +242,16 @@ export default function App() {
     setAdminPanelOpen(false);
   };
 
-  // Admin panel takes over the entire UI
+  // ============================================================
+  // SPLASH SCREEN — shown for first 2.2 seconds
+  // ============================================================
+  if (showSplash) {
+    return <SplashScreen onFinish={() => setShowSplash(false)} />;
+  }
+
+  // ============================================================
+  // ADMIN PANEL
+  // ============================================================
   if (adminPanelOpen) {
     return (
       <AdminDashboard
@@ -233,6 +263,8 @@ export default function App() {
         onToggleEnabled={handleToggleEnabled}
         telegramConfig={telegramConfig}
         onUpdateTelegramConfig={handleUpdateTelegramConfig}
+        currentAnnouncement={announcement}
+        onAnnouncementSaved={handleAnnouncementSaved}
         onExit={() => setAdminPanelOpen(false)}
         onLogout={handleAdminLogout}
       />
@@ -249,6 +281,9 @@ export default function App() {
           hasSecondaryMovies={secondaryMovies.length > 0}
           onNavigate={handleNavigate}
           onOpenAdminAccess={handleOpenAdminAccess}
+          onOpenMyOrders={() => navigateTo('/my-orders')}
+          announcementText={announcement}
+          announcementEnabled={announcementEnabled}
         />
 
         <main className="flex-1">
@@ -258,6 +293,7 @@ export default function App() {
         <Footer
           onOpenInfo={setInfoModalContent}
           onOpenAdminAccess={handleOpenAdminAccess}
+          onOpenMyOrders={() => navigateTo('/my-orders')}
         />
 
         <InfoModal
@@ -278,6 +314,8 @@ export default function App() {
         onNavigate={handleNavigate}
         onOpenAdminAccess={handleOpenAdminAccess}
         onOpenMyOrders={() => navigateTo('/my-orders')}
+        announcementText={announcement}
+        announcementEnabled={announcementEnabled}
       />
 
       <main className="flex-1 flex flex-col">
@@ -289,7 +327,11 @@ export default function App() {
           />
         ) : (
           <div className="py-20 text-center text-zinc-400">
-            <p>No active featured movie currently published.</p>
+            {storageSource === 'loading' ? (
+              <p>Loading movies...</p>
+            ) : (
+              <p>No movies available right now.</p>
+            )}
           </div>
         )}
 
