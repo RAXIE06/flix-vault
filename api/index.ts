@@ -10,7 +10,7 @@ import { simpleParser } from 'mailparser';
 dotenv.config();
 
 // ============================================================
-// MONGODB CONNECTION (Cached for serverless)
+// MONGODB CONNECTION (Cached for serverless with retry)
 // ============================================================
 let cached = (global as any).mongoose;
 if (!cached) {
@@ -18,31 +18,52 @@ if (!cached) {
 }
 
 async function connectDB() {
-  if (cached.conn) return cached.conn;
-
-  if (!cached.promise) {
-    const MONGODB_URI = process.env.MONGODB_URI;
-    if (!MONGODB_URI) throw new Error('MONGODB_URI not set');
-
-    cached.promise = mongoose.connect(MONGODB_URI, {
-      bufferCommands: false,
-      maxPoolSize: 5,
-      serverSelectionTimeoutMS: 10000,
-    });
+  // Already connected
+  if (cached.conn && mongoose.connection.readyState === 1) {
+    return cached.conn;
   }
+
+  // Connection in progress — wait for it
+  if (cached.promise) {
+    try {
+      cached.conn = await cached.promise;
+      if (mongoose.connection.readyState === 1) return cached.conn;
+      // If resolved but not connected, retry
+      cached.promise = null;
+    } catch {
+      cached.promise = null;
+      cached.conn = null;
+    }
+  }
+
+  const MONGODB_URI = process.env.MONGODB_URI;
+  if (!MONGODB_URI) throw new Error('MONGODB_URI not set');
+
+  cached.promise = mongoose.connect(MONGODB_URI, {
+    bufferCommands: false,
+    maxPoolSize: 5,
+    minPoolSize: 1,
+    serverSelectionTimeoutMS: 10000,
+    socketTimeoutMS: 45000,
+    connectTimeoutMS: 10000,
+    family: 4,
+    retryWrites: true,
+    retryReads: true,
+  });
 
   try {
     cached.conn = await cached.promise;
     console.log('[DB] MongoDB connected:', mongoose.connection.name);
+    return cached.conn;
   } catch (e: any) {
     cached.promise = null;
+    cached.conn = null;
     console.error('[DB] Connection failed:', e.message);
     throw e;
   }
-
-  return cached.conn;
 }
 
+// Initial connection attempt on cold start (non-blocking)
 connectDB().catch((e) => console.error('[DB] Initial connect failed:', e.message));
 
 // ============================================================
@@ -520,9 +541,21 @@ async function runPaymentVerificationScan(limit: number = 20) {
 }
 
 // ============================================================
-// HEALTH
+// HEALTH — waits for DB connection (with timeout)
 // ============================================================
-app.get('/api/health', (_req, res) => {
+app.get('/api/health', async (_req, res) => {
+  // Try to establish connection if not already connected
+  if (mongoose.connection.readyState !== 1) {
+    try {
+      await Promise.race([
+        connectDB(),
+        new Promise((_, reject) => setTimeout(() => reject(new Error('timeout')), 6000)),
+      ]);
+    } catch {
+      // Ignore — we'll report the actual state below
+    }
+  }
+
   res.json({
     status: 'ok',
     database: {
@@ -1212,7 +1245,16 @@ app.post('/api/admin/gmail/diagnose-parser', requireAdmin, (req, res) => {
 // ============================================================
 // DB STATUS
 // ============================================================
-app.get('/api/admin/db/status', requireAdmin, (_req, res) => {
+app.get('/api/admin/db/status', requireAdmin, async (_req, res) => {
+  if (mongoose.connection.readyState !== 1) {
+    try {
+      await Promise.race([
+        connectDB(),
+        new Promise((_, reject) => setTimeout(() => reject(new Error('timeout')), 5000)),
+      ]);
+    } catch { /* ignore */ }
+  }
+
   res.json({
     success: true,
     dbStatus: {
