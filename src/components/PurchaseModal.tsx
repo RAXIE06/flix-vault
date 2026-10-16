@@ -13,7 +13,6 @@ import {
   AlertCircle,
   Send,
   Clock,
-  Smartphone,
   Download,
 } from 'lucide-react';
 import QRCode from 'qrcode';
@@ -25,7 +24,6 @@ interface PurchaseModalProps {
   onClose: () => void;
 }
 
-// ✅ Changed from 120 to 300 (5 minutes)
 const VERIFY_MAX_SECONDS = 300;
 const RECOVERY_STORAGE_KEY = 'flixvault_my_orders';
 
@@ -62,10 +60,9 @@ export const PurchaseModal: React.FC<PurchaseModalProps> = ({ movie, onClose }) 
   const [error, setError] = useState<string | null>(null);
   const [copiedVpa, setCopiedVpa] = useState(false);
   const [copiedAmount, setCopiedAmount] = useState(false);
-  const [copiedUri, setCopiedUri] = useState(false);
   const [showDiagnostics, setShowDiagnostics] = useState(false);
   const [secondsElapsed, setSecondsElapsed] = useState(0);
-  const [upiPhoneHint, setUpiPhoneHint] = useState<string | null>(null);
+  const [qrHint, setQrHint] = useState<string | null>(null);
 
   // Initial order creation
   useEffect(() => {
@@ -182,14 +179,6 @@ export const PurchaseModal: React.FC<PurchaseModalProps> = ({ movie, onClose }) 
     }
   };
 
-  const handleCopyUri = () => {
-    if (order?.upiPaymentUri) {
-      navigator.clipboard.writeText(order.upiPaymentUri);
-      setCopiedUri(true);
-      setTimeout(() => setCopiedUri(false), 2000);
-    }
-  };
-
   // ============================================================
   // ✅ DOWNLOAD QR — saves QR image to device
   // ============================================================
@@ -202,56 +191,11 @@ export const PurchaseModal: React.FC<PurchaseModalProps> = ({ movie, onClose }) 
       document.body.appendChild(link);
       link.click();
       document.body.removeChild(link);
-      setUpiPhoneHint('✅ QR code download ho gaya! Ab UPI app se gallery mein jaake scan karo.');
-      setTimeout(() => setUpiPhoneHint(null), 5000);
+      setQrHint('✅ QR code download ho gaya! Ab UPI app se gallery mein jaake scan karo.');
+      setTimeout(() => setQrHint(null), 5000);
     } catch {
-      setUpiPhoneHint('QR download nahi ho paya. Screenshot lekar bhi use kar sakte hain.');
-      setTimeout(() => setUpiPhoneHint(null), 5000);
-    }
-  };
-
-  // ============================================================
-  // ✅ UPI DEEP LINK — uses EXACT server URI (proven to work with QR)
-  // ============================================================
-  const handleOpenUpiApp = () => {
-    if (!order) return;
-
-    const isMobile = /Android|iPhone|iPad|iPod|Mobile/i.test(navigator.userAgent);
-
-    if (!isMobile) {
-      setUpiPhoneHint(
-        '📱 Please scan the QR code above with your phone. UPI app deep links work only on mobile.'
-      );
-      setTimeout(() => setUpiPhoneHint(null), 5000);
-      return;
-    }
-
-    // ✅ Use the EXACT same URI that the QR code uses
-    // This is server-generated and proven to work
-    const uri = order.upiPaymentUri;
-
-    if (!uri || !uri.startsWith('upi://')) {
-      setUpiPhoneHint(
-        '⚠️ Invalid UPI link. Please scan the QR code above — that always works.'
-      );
-      setTimeout(() => setUpiPhoneHint(null), 6000);
-      return;
-    }
-
-    try {
-      // Direct navigation — most compatible approach
-      window.location.href = uri;
-
-      // Fallback hint if app doesn't open
-      setTimeout(() => {
-        setUpiPhoneHint(
-          '💡 Agar UPI app nahi khula, toh QR code scan karo — wo 100% reliable hai. Ya "Download QR" button se save karke UPI app mein gallery se scan karo.'
-        );
-        setTimeout(() => setUpiPhoneHint(null), 8000);
-      }, 2500);
-    } catch {
-      setUpiPhoneHint('Could not open UPI app. Please use the QR code or Download QR.');
-      setTimeout(() => setUpiPhoneHint(null), 6000);
+      setQrHint('QR download nahi ho paya. Screenshot lekar bhi use kar sakte hain.');
+      setTimeout(() => setQrHint(null), 5000);
     }
   };
 
@@ -429,39 +373,27 @@ export const PurchaseModal: React.FC<PurchaseModalProps> = ({ movie, onClose }) 
                     </button>
                   </div>
 
-                  {/* ✅ UPI Deep Link Button */}
+                  {/* ✅ Download QR Button */}
                   <div className="w-full">
                     <button
                       type="button"
-                      onClick={handleOpenUpiApp}
+                      onClick={handleDownloadQr}
                       className="w-full min-h-[46px] py-2.5 px-4 rounded-xl bg-gradient-to-r from-purple-600 to-violet-700 hover:from-purple-500 hover:to-violet-600 text-white font-bold text-xs sm:text-sm shadow-md shadow-purple-950 transition-all flex items-center justify-center gap-2 cursor-pointer active:scale-[0.98]"
                     >
-                      <Smartphone className="w-4 h-4" />
-                      <span>Pay via UPI App</span>
-                      <ExternalLink className="w-4 h-4" />
-                    </button>
-                  </div>
-
-                  {/* ✅ Download QR Button (NEW) */}
-                  <div className="w-full pt-2">
-                    <button
-                      type="button"
-                      onClick={handleDownloadQr}
-                      className="w-full min-h-[42px] py-2 px-4 rounded-xl bg-[#1a1428] hover:bg-[#231a38] text-purple-200 hover:text-white border border-purple-800/60 text-xs font-semibold transition-colors flex items-center justify-center gap-2 cursor-pointer"
-                    >
-                      <Download className="w-3.5 h-3.5" />
+                      <Download className="w-4 h-4" />
                       <span>Download QR Code</span>
                     </button>
                   </div>
 
-                  {upiPhoneHint && (
-                    <div className="w-full mt-2 p-2.5 rounded-lg bg-amber-950/50 border border-amber-800/60 text-[11px] text-amber-200 text-left leading-relaxed">
-                      {upiPhoneHint}
+                  {qrHint && (
+                    <div className="w-full mt-2 p-2.5 rounded-lg bg-emerald-950/50 border border-emerald-800/60 text-[11px] text-emerald-200 text-left leading-relaxed">
+                      {qrHint}
                     </div>
                   )}
 
-                  <p className="text-[10px] text-zinc-500 mt-2 text-center">
-                    📱 On mobile? Deep link works. On desktop? Scan or download QR.
+                  <p className="text-[10px] text-zinc-500 mt-3 text-center leading-relaxed">
+                    📱 Scan the QR code with any UPI app<br/>
+                    (Google Pay / PhonePe / Paytm / BHIM)
                   </p>
 
                   {/* LIVE VERIFICATION TIMER — 5 minutes */}
