@@ -1,5 +1,5 @@
 import React from 'react';
-import { ShoppingBag, Info, Film, Clock, Sparkles } from 'lucide-react';
+import { ShoppingBag, Info, Film, Clock, Sparkles, Languages } from 'lucide-react';
 import { Movie } from '../types';
 import { MoviePosterArt } from './MoviePosterArt';
 
@@ -14,7 +14,6 @@ export const SecondaryShowcase: React.FC<SecondaryShowcaseProps> = ({
   onBuyNow,
   onViewDetails,
 }) => {
-  // If there are no secondary movies (e.g., 1 movie total), do not render empty sections
   if (!movies || movies.length === 0) {
     return null;
   }
@@ -43,20 +42,15 @@ export const SecondaryShowcase: React.FC<SecondaryShowcaseProps> = ({
           </p>
         </div>
 
-        {/* 
-          Case A: Exactly 2 movies on site (1 secondary movie).
-          Render a prominent, large showcase card rather than a small grid item.
-        */}
+        {/* Case A: Single Secondary Movie */}
         {isSingleSecondary ? (
           <div className="rounded-2xl overflow-hidden bg-[#0d0917] border border-purple-900/40 shadow-xl shadow-purple-950/60 p-5 sm:p-7">
             <div className="grid grid-cols-1 md:grid-cols-12 gap-6 items-center">
               
-              {/* Media Container */}
               <div className="md:col-span-5 rounded-xl overflow-hidden bg-black aspect-[16/10] sm:aspect-[4/3] md:aspect-[3/4]">
                 <MoviePosterArt movie={movies[0]} variant="poster" className="w-full h-full object-cover" />
               </div>
 
-              {/* Information & Purchase */}
               <div className="md:col-span-7 space-y-3.5 text-left">
                 <div className="flex items-center gap-2 text-xs text-zinc-400 font-medium">
                   <span className="text-purple-400 font-semibold">{movies[0].genres.join(' · ')}</span>
@@ -73,6 +67,21 @@ export const SecondaryShowcase: React.FC<SecondaryShowcaseProps> = ({
                 <h3 className="text-2xl sm:text-3xl font-extrabold text-white font-['Outfit']">
                   {movies[0].title}
                 </h3>
+
+                {/* Languages Row */}
+                {movies[0].languages && movies[0].languages.length > 0 && (
+                  <div className="flex flex-wrap items-center gap-1.5">
+                    <Languages className="w-3.5 h-3.5 text-emerald-400 shrink-0" />
+                    {movies[0].languages.map((lang) => (
+                      <span
+                        key={lang}
+                        className="px-2 py-0.5 rounded-md text-[10px] font-semibold bg-emerald-950/60 border border-emerald-800/50 text-emerald-300 tracking-wide"
+                      >
+                        {lang}
+                      </span>
+                    ))}
+                  </div>
+                )}
 
                 <p className="text-xs sm:text-sm text-zinc-300 leading-relaxed line-clamp-3">
                   {movies[0].synopsis}
@@ -105,11 +114,7 @@ export const SecondaryShowcase: React.FC<SecondaryShowcaseProps> = ({
             </div>
           </div>
         ) : (
-          /* 
-            Case B: 3–5 movies total (2–4 secondary movies).
-            Mobile-first: Strict SINGLE-COLUMN layout on mobile (360px–430px).
-            Never cram posters into small multiple columns on a phone.
-          */
+          /* Case B: Multiple Secondary Movies */
           <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
             {movies.map((movie) => (
               <div
@@ -117,7 +122,6 @@ export const SecondaryShowcase: React.FC<SecondaryShowcaseProps> = ({
                 className="group rounded-2xl overflow-hidden bg-[#0c0915] border border-purple-950/70 hover:border-purple-700/60 transition-all duration-300 shadow-xl shadow-purple-950/40 flex flex-col justify-between"
               >
                 <div>
-                  {/* Large mobile artwork: generous aspect ratio */}
                   <div className="relative w-full aspect-[16/10] sm:aspect-[16/9] overflow-hidden bg-black/70">
                     <MoviePosterArt
                       movie={movie}
@@ -125,7 +129,6 @@ export const SecondaryShowcase: React.FC<SecondaryShowcaseProps> = ({
                       className="w-full h-full object-cover group-hover:scale-102 transition-transform duration-500"
                     />
                     
-                    {/* Gradient overlay */}
                     <div className="absolute inset-0 bg-gradient-to-t from-[#0c0915] via-[#0c0915]/40 to-transparent" />
 
                     <div className="absolute top-3 right-3">
@@ -143,11 +146,30 @@ export const SecondaryShowcase: React.FC<SecondaryShowcaseProps> = ({
                     </div>
                   </div>
 
-                  {/* Card Content Area */}
                   <div className="p-4 sm:p-5 text-left space-y-2">
                     <h3 className="text-xl sm:text-2xl font-bold text-white font-['Outfit'] tracking-tight group-hover:text-purple-300 transition-colors">
                       {movie.title}
                     </h3>
+
+                    {/* Languages Row */}
+                    {movie.languages && movie.languages.length > 0 && (
+                      <div className="flex flex-wrap items-center gap-1.5">
+                        <Languages className="w-3 h-3 text-emerald-400 shrink-0" />
+                        {movie.languages.slice(0, 4).map((lang) => (
+                          <span
+                            key={lang}
+                            className="px-1.5 py-0.5 rounded text-[9px] font-semibold bg-emerald-950/60 border border-emerald-800/50 text-emerald-300 tracking-wide"
+                          >
+                            {lang}
+                          </span>
+                        ))}
+                        {movie.languages.length > 4 && (
+                          <span className="text-[9px] text-zinc-500 font-mono">
+                            +{movie.languages.length - 4}
+                          </span>
+                        )}
+                      </div>
+                    )}
 
                     <p className="text-xs sm:text-sm text-zinc-300 leading-relaxed line-clamp-2">
                       {movie.synopsis}
@@ -159,7 +181,6 @@ export const SecondaryShowcase: React.FC<SecondaryShowcaseProps> = ({
                   </div>
                 </div>
 
-                {/* Price and CTA row */}
                 <div className="p-4 sm:p-5 pt-0">
                   <div className="pt-3 border-t border-purple-950/60 flex items-center justify-between gap-3">
                     <div>
