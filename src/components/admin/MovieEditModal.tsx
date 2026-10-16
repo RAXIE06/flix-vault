@@ -13,7 +13,7 @@ import {
   Loader2,
 } from 'lucide-react';
 import { Movie } from '../../types';
-import { GENRES } from '../../data/movies';
+import { GENRES, AVAILABLE_LANGUAGES, AVAILABLE_ASPECT_RATIOS } from '../../data/movies';
 import { MoviePosterArt } from '../MoviePosterArt';
 import { api } from '../../services/api';
 
@@ -40,6 +40,8 @@ export const MovieEditModal: React.FC<MovieEditModalProps> = ({
   const [duration, setDuration] = useState('2h 10m');
   const [rating, setRating] = useState('U/A 13+');
   const [selectedGenres, setSelectedGenres] = useState<string[]>(['Sci-Fi']);
+  const [selectedLanguages, setSelectedLanguages] = useState<string[]>(['Hindi']);
+  const [posterAspectRatio, setPosterAspectRatio] = useState<'2:3' | '16:9' | '1:1' | '4:5'>('2:3');
   const [priceSample, setPriceSample] = useState('₹149');
   const [director, setDirector] = useState('');
   const [cast, setCast] = useState('');
@@ -68,6 +70,8 @@ export const MovieEditModal: React.FC<MovieEditModalProps> = ({
       setDuration(movie.duration);
       setRating(movie.rating);
       setSelectedGenres(movie.genres);
+      setSelectedLanguages(movie.languages && movie.languages.length > 0 ? movie.languages : ['Hindi']);
+      setPosterAspectRatio((movie.posterAspectRatio as any) || '2:3');
       setPriceSample(movie.priceSample);
       setDirector(movie.director);
       setCast(movie.cast.join(', '));
@@ -98,6 +102,8 @@ export const MovieEditModal: React.FC<MovieEditModalProps> = ({
       setDuration('2h 00m');
       setRating('U/A 13+');
       setSelectedGenres(['Sci-Fi', 'Mystery']);
+      setSelectedLanguages(['Hindi']);
+      setPosterAspectRatio('2:3');
       setPriceSample('₹149');
       setDirector('Elena Vance');
       setCast('Lead Actor, Supporting Actor');
@@ -131,6 +137,16 @@ export const MovieEditModal: React.FC<MovieEditModalProps> = ({
       }
     } else {
       setSelectedGenres([...selectedGenres, genre]);
+    }
+  };
+
+  const handleLanguageToggle = (lang: string) => {
+    if (selectedLanguages.includes(lang)) {
+      if (selectedLanguages.length > 1) {
+        setSelectedLanguages(selectedLanguages.filter((l) => l !== lang));
+      }
+    } else {
+      setSelectedLanguages([...selectedLanguages, lang]);
     }
   };
 
@@ -299,6 +315,8 @@ export const MovieEditModal: React.FC<MovieEditModalProps> = ({
       duration: duration.trim() || '2h 00m',
       rating,
       genres: selectedGenres,
+      languages: selectedLanguages,
+      posterAspectRatio,
       priceSample: formattedPrice,
       priceNumeric: numericPrice,
       accessType: 'pay_per_movie',
@@ -342,6 +360,8 @@ export const MovieEditModal: React.FC<MovieEditModalProps> = ({
     accessLabel: `Pay per Movie · ${priceSample || '₹149'}`,
     resolution,
     audio,
+    languages: selectedLanguages,
+    posterAspectRatio,
     customPosterUrl: posterPreviewUrl || customPosterUrl || undefined,
     artwork: {
       bgGradient: 'from-violet-950 to-black',
@@ -537,6 +557,37 @@ export const MovieEditModal: React.FC<MovieEditModalProps> = ({
                 </div>
               </div>
 
+              {/* ============================================================ */}
+              {/* LANGUAGES MULTI-SELECT                                       */}
+              {/* ============================================================ */}
+              <div>
+                <label className="block text-xs font-semibold text-zinc-300 mb-1.5">
+                  Languages (Click to toggle — Multiple supported)
+                </label>
+                <div className="flex flex-wrap gap-1.5">
+                  {AVAILABLE_LANGUAGES.map((lang) => {
+                    const isSelected = selectedLanguages.includes(lang);
+                    return (
+                      <button
+                        type="button"
+                        key={lang}
+                        onClick={() => handleLanguageToggle(lang)}
+                        className={`px-2.5 py-1 rounded-lg text-xs font-medium transition-colors cursor-pointer ${
+                          isSelected
+                            ? 'bg-emerald-600 text-white shadow-sm'
+                            : 'bg-[#150f24] text-zinc-400 border border-purple-950/60 hover:text-white'
+                        }`}
+                      >
+                        {lang}
+                      </button>
+                    );
+                  })}
+                </div>
+                <p className="text-[10px] text-zinc-500 mt-1">
+                  Selected: {selectedLanguages.join(', ') || 'None'}
+                </p>
+              </div>
+
               <div className="grid grid-cols-2 gap-3">
                 <div>
                   <label className="block text-xs font-semibold text-zinc-300 mb-1">Master Resolution</label>
@@ -690,6 +741,26 @@ export const MovieEditModal: React.FC<MovieEditModalProps> = ({
                 )}
               </div>
 
+              {/* ============================================================ */}
+              {/* POSTER ASPECT RATIO SELECTOR                                */}
+              {/* ============================================================ */}
+              <div>
+                <label className="block text-xs font-semibold text-zinc-300 mb-1">
+                  Poster Display Aspect Ratio
+                </label>
+                <select
+                  value={posterAspectRatio}
+                  onChange={(e) => setPosterAspectRatio(e.target.value as any)}
+                  className="w-full px-3 py-2 bg-[#140f24] border border-purple-950/70 focus:border-purple-500 rounded-xl text-xs text-white focus:outline-none cursor-pointer mb-2"
+                >
+                  {AVAILABLE_ASPECT_RATIOS.map((ratio) => (
+                    <option key={ratio.value} value={ratio.value}>
+                      {ratio.label}
+                    </option>
+                  ))}
+                </select>
+              </div>
+
               <div>
                 <label className="block text-xs font-semibold text-zinc-300 mb-1">
                   Procedural Artwork Motif (Fallback)
@@ -709,7 +780,17 @@ export const MovieEditModal: React.FC<MovieEditModalProps> = ({
                   <option value="archive">Archive Broadcast (Retro Waveform)</option>
                 </select>
 
-                <div className="rounded-xl overflow-hidden border border-purple-900/50 aspect-[3/4] bg-black shadow-lg relative">
+                <div
+                  className={`rounded-xl overflow-hidden border border-purple-900/50 bg-black shadow-lg relative ${
+                    posterAspectRatio === '2:3'
+                      ? 'aspect-[2/3]'
+                      : posterAspectRatio === '16:9'
+                      ? 'aspect-video'
+                      : posterAspectRatio === '1:1'
+                      ? 'aspect-square'
+                      : 'aspect-[4/5]'
+                  }`}
+                >
                   <MoviePosterArt movie={previewMovie} variant="poster" className="w-full h-full object-cover" />
                   {isUploadingPoster && (
                     <div className="absolute inset-0 bg-black/80 backdrop-blur-xs flex flex-col items-center justify-center gap-2 z-10">
