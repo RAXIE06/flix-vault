@@ -10,7 +10,7 @@ import {
   Languages,
 } from 'lucide-react';
 import { Movie } from '../types';
-import { MoviePosterArt } from './MoviePosterArt';
+import { MoviePosterArt } from "./components/MoviePosterArt";
 
 interface MovieDetailsModalProps {
   movie: Movie | null;
