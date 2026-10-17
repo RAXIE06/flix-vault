@@ -1,7 +1,6 @@
 import React, { useEffect } from 'react';
 import {
   X,
-  Star,
   Clock,
   Calendar,
   Film,
@@ -97,7 +96,7 @@ export const MovieDetailsModal: React.FC<MovieDetailsModalProps> = ({
             </span>
           </div>
 
-          {/* ✅ LANGUAGES ROW (NEW) */}
+          {/* LANGUAGES ROW */}
           {movie.languages && movie.languages.length > 0 && (
             <div className="flex items-center gap-2">
               <Languages className="w-4 h-4 text-emerald-400 shrink-0" />
