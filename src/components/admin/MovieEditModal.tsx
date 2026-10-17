@@ -45,7 +45,7 @@ export const MovieEditModal: React.FC<MovieEditModalProps> = ({
   const [priceSample, setPriceSample] = useState('₹149');
   const [director, setDirector] = useState('');
   const [cast, setCast] = useState('');
-  const [resolution, setResolution] = useState<'4K IMAX' | '4K HDR' | '1080p HD'>('4K IMAX');
+  const [resolution, setResolution] = useState<'480p' | '720p' | '1080p' | '2K' | '4K' | '8K'>('1080p');
   const [audio, setAudio] = useState<'Dolby Atmos' | '5.1 Surround'>('Dolby Atmos');
   const [motif, setMotif] = useState<Movie['artwork']['motif']>('nebula');
   const [telegramChannelId, setTelegramChannelId] = useState('');
@@ -75,7 +75,7 @@ export const MovieEditModal: React.FC<MovieEditModalProps> = ({
       setPriceSample(movie.priceSample);
       setDirector(movie.director);
       setCast(movie.cast.join(', '));
-      setResolution(movie.resolution);
+      setResolution((movie.resolution as any) || '1080p');
       setAudio(movie.audio);
       setMotif(movie.artwork.motif);
       setTelegramChannelId(movie.telegramChannelId || '');
@@ -107,7 +107,7 @@ export const MovieEditModal: React.FC<MovieEditModalProps> = ({
       setPriceSample('₹149');
       setDirector('Elena Vance');
       setCast('Lead Actor, Supporting Actor');
-      setResolution('4K IMAX');
+      setResolution('1080p');
       setAudio('Dolby Atmos');
       setMotif('nebula');
       setTelegramChannelId('@flixvault_vip_channel');
@@ -557,9 +557,7 @@ export const MovieEditModal: React.FC<MovieEditModalProps> = ({
                 </div>
               </div>
 
-              {/* ============================================================ */}
-              {/* LANGUAGES MULTI-SELECT                                       */}
-              {/* ============================================================ */}
+              {/* LANGUAGES MULTI-SELECT */}
               <div>
                 <label className="block text-xs font-semibold text-zinc-300 mb-1.5">
                   Languages (Click to toggle — Multiple supported)
@@ -596,9 +594,12 @@ export const MovieEditModal: React.FC<MovieEditModalProps> = ({
                     onChange={(e) => setResolution(e.target.value as any)}
                     className="w-full px-3 py-2 bg-[#140f24] border border-purple-950/70 focus:border-purple-500 rounded-xl text-xs text-white focus:outline-none cursor-pointer"
                   >
-                    <option value="4K IMAX">4K IMAX Enhanced</option>
-                    <option value="4K HDR">4K HDR10+</option>
-                    <option value="1080p HD">1080p Full HD</option>
+                    <option value="480p">480p (SD)</option>
+                    <option value="720p">720p (HD)</option>
+                    <option value="1080p">1080p (Full HD)</option>
+                    <option value="2K">2K (Quad HD)</option>
+                    <option value="4K">4K (Ultra HD)</option>
+                    <option value="8K">8K (Ultra HD 8K)</option>
                   </select>
                 </div>
 
@@ -741,9 +742,7 @@ export const MovieEditModal: React.FC<MovieEditModalProps> = ({
                 )}
               </div>
 
-              {/* ============================================================ */}
-              {/* POSTER ASPECT RATIO SELECTOR                                */}
-              {/* ============================================================ */}
+              {/* POSTER ASPECT RATIO SELECTOR */}
               <div>
                 <label className="block text-xs font-semibold text-zinc-300 mb-1">
                   Poster Display Aspect Ratio
