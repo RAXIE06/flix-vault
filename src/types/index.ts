@@ -13,7 +13,7 @@ export interface Movie {
   priceNumeric?: number; // Base price number e.g. 149
   accessType: 'pay_per_movie';
   accessLabel: string; // e.g. "Pay per Movie · ₹149"
-  resolution: '4K HDR' | '4K IMAX' | '1080p HD';
+  resolution: '480p' | '720p' | '1080p' | '2K' | '4K' | '8K';
   audio: 'Dolby Atmos' | '5.1 Surround';
   languages?: string[]; // Multiple languages (Hindi, English, Tamil, etc.)
   posterAspectRatio?: '2:3' | '16:9' | '1:1' | '4:5'; // Poster display aspect ratio
