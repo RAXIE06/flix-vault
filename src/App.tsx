@@ -1,400 +1,186 @@
-import React, { useState, useEffect, useCallback, useMemo } from 'react';
-import { Movie, TelegramConfig, InfoModalContent } from './types';
+import React, { useEffect } from 'react';
 import {
-  INITIAL_TELEGRAM_CONFIG,
-  resolveFeaturedMovie,
-  resolveSecondaryMovies,
-} from './data/movies';
-import { api } from './services/api';
-import { Header } from './components/Header';
-import { FeaturedHero } from './components/FeaturedHero';
-import { MovieDetailsModal } from './components/MovieDetailsModal';
-import { PurchaseModal } from './components/PurchaseModal';
-import { AdminAccessModal } from './components/AdminAccessModal';
-import { AdminDashboard } from './components/admin/AdminDashboard';
-import { InfoModal } from './components/InfoModal';
-import { Footer } from './components/Footer';
-import { MyOrdersPage } from './components/MyOrdersPage';
-import { SplashScreen } from './components/SplashScreen';
-import { MoviePosterArt } from './components/MoviePosterArt';
+  X,
+  Star,
+  Clock,
+  Calendar,
+  Film,
+  ShieldCheck,
+  ShoppingBag,
+  Users,
+  Languages,
+} from 'lucide-react';
+import { Movie } from '../types';
+import { MoviePosterArt } from './MoviePosterArt';
 
-const LOCAL_FALLBACK_MOVIES: Movie[] = [];
+interface MovieDetailsModalProps {
+  movie: Movie | null;
+  onClose: () => void;
+  onBuyNow: (movie: Movie) => void;
+}
 
-export default function App() {
-  const [showSplash, setShowSplash] = useState(true);
-  const [movies, setMovies] = useState<Movie[]>([]);
-  const [adminMovies, setAdminMovies] = useState<Movie[]>([]);
-  const [telegramConfig, setTelegramConfig] = useState<TelegramConfig>(INITIAL_TELEGRAM_CONFIG);
-  const [announcement, setAnnouncement] = useState<string | undefined>(undefined);
-  const [announcementEnabled, setAnnouncementEnabled] = useState(true);
-  const [storageSource, setStorageSource] = useState<string>('loading');
-  const [dbStatus, setDbStatus] = useState<any>(null);
-
-  const [adminModalOpen, setAdminModalOpen] = useState(false);
-  const [adminPanelOpen, setAdminPanelOpen] = useState(false);
-  const [isAdminAuthenticated, setIsAdminAuthenticated] = useState(false);
-
-  const [detailsMovie, setDetailsMovie] = useState<Movie | null>(null);
-  const [purchaseMovie, setPurchaseMovie] = useState<Movie | null>(null);
-  const [infoModalContent, setInfoModalContent] = useState<InfoModalContent | null>(null);
-
-  // ROUTING
-  const [currentRoute, setCurrentRoute] = useState<string>(() =>
-    window.location.hash.replace('#', '') || '/'
-  );
-
+export const MovieDetailsModal: React.FC<MovieDetailsModalProps> = ({
+  movie,
+  onClose,
+  onBuyNow,
+}) => {
+  // ESC key handler
   useEffect(() => {
-    const handleHashChange = () =>
-      setCurrentRoute(window.location.hash.replace('#', '') || '/');
-    window.addEventListener('hashchange', handleHashChange);
-    return () => window.removeEventListener('hashchange', handleHashChange);
-  }, []);
-
-  const navigateTo = useCallback((route: string) => {
-    window.location.hash = route;
-    window.scrollTo({ top: 0, behavior: 'smooth' });
-  }, []);
-
-  // LOAD STOREFRONT
-  const loadPublicStorefront = useCallback(async () => {
-    const fetchWithRetry = async (attempt: number): Promise<any> => {
-      try {
-        const [moviesRes, healthRes] = await Promise.all([
-          api.getPublicMovies(),
-          api.checkHealth(),
-        ]);
-        return { moviesRes, healthRes };
-      } catch (err) {
-        if (attempt < 3) {
-          await new Promise((r) => setTimeout(r, 1500));
-          return fetchWithRetry(attempt + 1);
-        }
-        throw err;
-      }
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') onClose();
     };
+    if (movie) window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [movie, onClose]);
 
-    try {
-      const { moviesRes, healthRes } = await fetchWithRetry(1);
+  if (!movie) return null;
 
-      if (moviesRes?.movies) {
-        setMovies((prev) => (moviesRes.movies.length > 0 ? moviesRes.movies : prev));
-        setStorageSource(moviesRes.storage || 'mongodb');
-      }
-      if (healthRes?.database) setDbStatus(healthRes.database);
-    } catch (err: any) {
-      console.warn('[FlixVault] Server unavailable after retries');
-      setMovies((prev) => (prev.length > 0 ? prev : LOCAL_FALLBACK_MOVIES));
-      setStorageSource('offline');
-      setDbStatus({ connected: false, fallback: true });
-    }
-  }, []);
-
-  // LOAD ANNOUNCEMENT
-  const loadAnnouncement = useCallback(async () => {
-    try {
-      const res = await fetch('/api/settings/announcement');
-      if (!res.ok) return;
-      const data = await res.json();
-      if (data.text) setAnnouncement(data.text);
-      setAnnouncementEnabled(data.enabled !== false);
-    } catch {
-      // Ignore
-    }
-  }, []);
-
-  const loadAdminData = useCallback(async () => {
-    try {
-      const [adminMoviesRes, settingsRes] = await Promise.all([
-        api.getAdminMovies(),
-        api.getAdminSettings(),
-      ]);
-      if (adminMoviesRes?.movies) setAdminMovies(adminMoviesRes.movies);
-      if (settingsRes?.settings?.telegramConfig) {
-        setTelegramConfig(settingsRes.settings.telegramConfig);
-      }
-    } catch (err) {
-      console.warn('[FlixVault] Admin data unavailable:', err);
-    }
-  }, []);
-
-  useEffect(() => {
-    loadPublicStorefront();
-    loadAnnouncement();
-    api.checkAdminSession().then(setIsAdminAuthenticated).catch(() => {});
-  }, [loadPublicStorefront, loadAnnouncement]);
-
-  useEffect(() => {
-    if (adminPanelOpen) loadAdminData();
-  }, [adminPanelOpen, loadAdminData]);
-
-  const primaryFeaturedMovie = useMemo(() => resolveFeaturedMovie(movies), [movies]);
-  const secondaryMovies = useMemo(
-    () => resolveSecondaryMovies(movies, primaryFeaturedMovie?.id),
-    [movies, primaryFeaturedMovie]
-  );
-
-  // HANDLERS
-  const handleNavigate = useCallback(
-    (sectionId: string) => {
-      if (currentRoute === '/my-orders') {
-        navigateTo('/');
-        setTimeout(() => {
-          document.getElementById(sectionId)?.scrollIntoView({ behavior: 'smooth' });
-        }, 200);
-        return;
-      }
-      document.getElementById(sectionId)?.scrollIntoView({ behavior: 'smooth' });
-    },
-    [currentRoute, navigateTo]
-  );
-
-  const handleAddMovie = async (newMovie: Movie) => {
-    try {
-      await api.createMovie(newMovie);
-      await Promise.all([loadAdminData(), loadPublicStorefront()]);
-    } catch (err: any) {
-      console.error('Add movie failed:', err);
-      setAdminMovies((prev) => [newMovie, ...prev]);
-    }
-  };
-
-  const handleUpdateMovie = async (updatedMovie: Movie) => {
-    try {
-      await api.updateMovie(updatedMovie.id, updatedMovie);
-      await Promise.all([loadAdminData(), loadPublicStorefront()]);
-    } catch (err: any) {
-      console.error('Update movie failed:', err);
-      setAdminMovies((prev) => prev.map((m) => (m.id === updatedMovie.id ? updatedMovie : m)));
-    }
-  };
-
-  const handleDeleteMovie = async (movieId: string) => {
-    try {
-      await api.deleteMovie(movieId);
-      await Promise.all([loadAdminData(), loadPublicStorefront()]);
-    } catch (err: any) {
-      console.error('Delete movie failed:', err);
-      setAdminMovies((prev) => prev.filter((m) => m.id !== movieId));
-    }
-  };
-
-  const handleSetFeatured = async (movieId: string) => {
-    try {
-      await api.setFeaturedMovie(movieId);
-      await Promise.all([loadAdminData(), loadPublicStorefront()]);
-    } catch (err: any) {
-      console.error('Set featured failed:', err);
-      setAdminMovies((prev) => prev.map((m) => ({ ...m, isFeatured: m.id === movieId })));
-    }
-  };
-
-  const handleToggleEnabled = async (movieId: string) => {
-    try {
-      await api.toggleMovieStatus(movieId);
-      await Promise.all([loadAdminData(), loadPublicStorefront()]);
-    } catch (err: any) {
-      console.error('Toggle failed:', err);
-      setAdminMovies((prev) =>
-        prev.map((m) => (m.id === movieId ? { ...m, isEnabled: !m.isEnabled } : m))
-      );
-    }
-  };
-
-  const handleUpdateTelegramConfig = async (updated: Partial<TelegramConfig>) => {
-    const newConfig = { ...telegramConfig, ...updated };
-    setTelegramConfig(newConfig);
-    try {
-      await api.updateAdminSettings({ telegramConfig: newConfig });
-    } catch (err) {
-      console.warn('Settings save failed:', err);
-    }
-  };
-
-  const handleAnnouncementSaved = (text: string, enabled: boolean) => {
-    setAnnouncement(text);
-    setAnnouncementEnabled(enabled);
-  };
-
-  const handleAdminAuthenticated = () => {
-    setIsAdminAuthenticated(true);
-    setAdminModalOpen(false);
-    setAdminPanelOpen(true);
-  };
-
-  const handleOpenAdminAccess = useCallback(() => setAdminModalOpen(true), []);
-
-  const handleAdminLogout = async () => {
-    try {
-      await api.logoutAdmin();
-    } catch {
-      // Ignore
-    }
-    setIsAdminAuthenticated(false);
-    setAdminPanelOpen(false);
-  };
-
-  // SPLASH SCREEN
-  if (showSplash) {
-    return <SplashScreen onFinish={() => setShowSplash(false)} />;
-  }
-
-  // ADMIN PANEL
-  if (adminPanelOpen) {
-    return (
-      <AdminDashboard
-        movies={adminMovies.length > 0 ? adminMovies : movies}
-        onAddMovie={handleAddMovie}
-        onUpdateMovie={handleUpdateMovie}
-        onDeleteMovie={handleDeleteMovie}
-        onSetFeatured={handleSetFeatured}
-        onToggleEnabled={handleToggleEnabled}
-        telegramConfig={telegramConfig}
-        onUpdateTelegramConfig={handleUpdateTelegramConfig}
-        currentAnnouncement={announcement}
-        onAnnouncementSaved={handleAnnouncementSaved}
-        onExit={() => setAdminPanelOpen(false)}
-        onLogout={handleAdminLogout}
-      />
-    );
-  }
-
-  // ROUTE: /my-orders
-  if (currentRoute === '/my-orders') {
-    return (
-      <div className="min-h-screen bg-[#08070d] text-zinc-100 flex flex-col">
-        <Header
-          hasSecondaryMovies={secondaryMovies.length > 0}
-          onNavigate={handleNavigate}
-          onOpenAdminAccess={handleOpenAdminAccess}
-          onOpenMyOrders={() => navigateTo('/my-orders')}
-          announcementText={announcement}
-          announcementEnabled={announcementEnabled}
-        />
-
-        <main className="flex-1">
-          <MyOrdersPage onBack={() => navigateTo('/')} />
-        </main>
-
-        <Footer
-          onOpenInfo={setInfoModalContent}
-          onOpenAdminAccess={handleOpenAdminAccess}
-          onOpenMyOrders={() => navigateTo('/my-orders')}
-        />
-
-        <InfoModal
-          content={infoModalContent}
-          onClose={() => setInfoModalContent(null)}
-        />
-      </div>
-    );
-  }
-
-  // ROUTE: / (Home)
   return (
-    <div className="min-h-screen bg-[#08070d] text-zinc-100 flex flex-col selection:bg-purple-600 selection:text-white">
-      <Header
-        hasSecondaryMovies={secondaryMovies.length > 0}
-        onNavigate={handleNavigate}
-        onOpenAdminAccess={handleOpenAdminAccess}
-        onOpenMyOrders={() => navigateTo('/my-orders')}
-        announcementText={announcement}
-        announcementEnabled={announcementEnabled}
-      />
+    <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center p-0 sm:p-4 bg-black/85 backdrop-blur-md animate-in fade-in duration-200">
+      <div
+        className="relative w-full max-w-2xl bg-[#0e0a19] border-t sm:border border-purple-900/70 rounded-t-3xl sm:rounded-3xl shadow-2xl shadow-purple-950/90 text-left max-h-[92vh] overflow-y-auto"
+        role="dialog"
+        aria-modal="true"
+      >
+        {/* Close Button */}
+        <button
+          onClick={onClose}
+          className="absolute top-4 right-4 z-20 p-2 text-white bg-black/60 hover:bg-black/80 rounded-full backdrop-blur-md transition-colors cursor-pointer"
+          aria-label="Close"
+        >
+          <X className="w-5 h-5" />
+        </button>
 
-      <main className="flex-1 flex flex-col">
-        {/* FEATURED HERO */}
-        {primaryFeaturedMovie ? (
-          <FeaturedHero
-            movie={primaryFeaturedMovie}
-            onBuyNow={(movie) => setPurchaseMovie(movie)}
-            onViewDetails={(movie) => setDetailsMovie(movie)}
+        {/* Poster Header */}
+        <div className="relative w-full aspect-[16/9] sm:aspect-[21/9] overflow-hidden bg-black">
+          <MoviePosterArt
+            movie={movie}
+            variant="backdrop"
+            className="w-full h-full object-cover"
           />
-        ) : (
-          <div className="py-20 text-center text-zinc-400">
-            {storageSource === 'loading' ? (
-              <p>Loading movies...</p>
-            ) : (
-              <p>No movies available right now.</p>
+          <div className="absolute inset-0 bg-gradient-to-t from-[#0e0a19] via-[#0e0a19]/40 to-transparent" />
+        </div>
+
+        {/* Content */}
+        <div className="p-5 sm:p-8 space-y-5">
+          
+          {/* Title & Tagline */}
+          <div>
+            <h2 className="text-2xl sm:text-4xl font-extrabold text-white font-['Outfit'] leading-tight">
+              {movie.title}
+            </h2>
+            {movie.tagline && (
+              <p className="text-purple-300/90 text-xs sm:text-sm italic font-serif mt-1">
+                &ldquo;{movie.tagline}&rdquo;
+              </p>
             )}
           </div>
-        )}
 
-        {/* PREMIUM RELEASES — Clean Grid (No duplicate title) */}
-        {secondaryMovies.length > 0 && (
-          <div className="w-full py-8 sm:py-12 bg-[#08070d]">
-            <div className="max-w-6xl mx-auto px-3 sm:px-6">
-              
-              {/* Heading */}
-              <div className="mb-5 sm:mb-6 px-1">
-                <h2 className="text-xl sm:text-2xl font-bold text-white font-['Outfit']">
-                  Premium Releases
-                </h2>
-                <p className="text-xs text-zinc-500 mt-0.5">
-                  {secondaryMovies.length} titles in the vault
-                </p>
-              </div>
+          {/* Metadata Row (Genre, Year, Duration, Rating) */}
+          <div className="flex flex-wrap items-center gap-x-3 gap-y-2 text-xs sm:text-sm font-medium text-zinc-300">
+            <span className="text-purple-400 font-semibold uppercase tracking-wider">
+              {movie.genres.join(' · ')}
+            </span>
+            <span className="text-zinc-600">·</span>
+            <span className="flex items-center gap-1">
+              <Calendar className="w-3.5 h-3.5 text-zinc-500" />
+              {movie.year}
+            </span>
+            <span className="text-zinc-600">·</span>
+            <span className="flex items-center gap-1">
+              <Clock className="w-3.5 h-3.5 text-zinc-500" />
+              {movie.duration}
+            </span>
+            <span className="text-zinc-600">·</span>
+            <span className="px-1.5 py-0.5 rounded text-[10px] bg-zinc-800 border border-zinc-700">
+              {movie.rating}
+            </span>
+          </div>
 
-              {/* Responsive Grid */}
-              <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-3 sm:gap-4">
-                {secondaryMovies.map((movie) => (
-                  <button
-                    key={movie.id}
-                    onClick={() => setDetailsMovie(movie)}
-                    className="group relative rounded-xl overflow-hidden border border-purple-950/60 hover:border-purple-600/70 transition-all duration-300 hover:shadow-lg hover:shadow-purple-950/50 text-left cursor-pointer"
+          {/* ✅ LANGUAGES ROW (NEW) */}
+          {movie.languages && movie.languages.length > 0 && (
+            <div className="flex items-center gap-2">
+              <Languages className="w-4 h-4 text-emerald-400 shrink-0" />
+              <div className="flex flex-wrap gap-1.5">
+                {movie.languages.map((lang) => (
+                  <span
+                    key={lang}
+                    className="px-2 py-0.5 rounded-md text-[11px] font-semibold bg-emerald-950/60 border border-emerald-800/50 text-emerald-300 tracking-wide"
                   >
-                    {/* Poster Container with MoviePosterArt */}
-                    <div className="relative w-full aspect-[2/3] overflow-hidden bg-black">
-                      <MoviePosterArt
-                        movie={movie}
-                        variant="compact"
-                        className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-500"
-                      />
-
-                      {/* Price Badge (Top Right) */}
-                      <div className="absolute top-2 right-2 z-10">
-                        <span className="px-1.5 py-0.5 rounded-md text-[10px] font-bold bg-gradient-to-r from-purple-600 to-violet-700 text-white shadow-md">
-                          {movie.priceSample}
-                        </span>
-                      </div>
-                    </div>
-                  </button>
+                    {lang}
+                  </span>
                 ))}
               </div>
             </div>
+          )}
+
+          {/* Technical Specs (Resolution, Audio) */}
+          <div className="flex flex-wrap items-center gap-2">
+            <span className="px-2 py-0.5 rounded text-[10px] font-mono bg-purple-950/60 border border-purple-800/50 text-purple-200">
+              {movie.resolution}
+            </span>
+            <span className="px-2 py-0.5 rounded text-[10px] font-mono bg-purple-950/60 border border-purple-800/50 text-purple-200">
+              {movie.audio}
+            </span>
           </div>
-        )}
-      </main>
 
-      <Footer
-        onOpenInfo={setInfoModalContent}
-        onOpenAdminAccess={handleOpenAdminAccess}
-        onOpenMyOrders={() => navigateTo('/my-orders')}
-      />
+          {/* Synopsis */}
+          <div className="space-y-1">
+            <h4 className="text-xs font-semibold text-zinc-400 uppercase tracking-wider">
+              Synopsis
+            </h4>
+            <p className="text-sm text-zinc-300 leading-relaxed">
+              {movie.synopsis}
+            </p>
+          </div>
 
-      <PurchaseModal
-        movie={purchaseMovie}
-        onClose={() => setPurchaseMovie(null)}
-      />
+          {/* Director & Cast */}
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 pt-2 border-t border-purple-950/40">
+            <div>
+              <h4 className="text-xs font-semibold text-zinc-500 flex items-center gap-1.5 mb-1">
+                <Film className="w-3.5 h-3.5" /> Director
+              </h4>
+              <p className="text-sm text-zinc-200 font-medium">{movie.director}</p>
+            </div>
+            <div>
+              <h4 className="text-xs font-semibold text-zinc-500 flex items-center gap-1.5 mb-1">
+                <Users className="w-3.5 h-3.5" /> Cast
+              </h4>
+              <p className="text-sm text-zinc-200 font-medium line-clamp-2">
+                {movie.cast.join(', ')}
+              </p>
+            </div>
+          </div>
 
-      <MovieDetailsModal
-        movie={detailsMovie}
-        onClose={() => setDetailsMovie(null)}
-        onBuyNow={(movie) => {
-          setDetailsMovie(null);
-          setPurchaseMovie(movie);
-        }}
-      />
+          {/* Price & Buy Button */}
+          <div className="pt-4 border-t border-purple-950/60 flex flex-col sm:flex-row items-center justify-between gap-4">
+            <div>
+              <span className="text-[10px] text-zinc-500 uppercase font-mono block">Price</span>
+              <div className="flex items-baseline gap-2">
+                <span className="text-3xl font-extrabold text-white font-['Outfit']">
+                  {movie.priceSample}
+                </span>
+                <span className="text-[11px] text-zinc-400">(Permanent Access)</span>
+              </div>
+            </div>
 
-      <AdminAccessModal
-        isOpen={adminModalOpen}
-        onClose={() => setAdminModalOpen(false)}
-        onAuthenticated={handleAdminAuthenticated}
-      />
+            <button
+              onClick={() => onBuyNow(movie)}
+              className="w-full sm:w-auto min-h-[48px] px-8 py-3 rounded-xl bg-gradient-to-r from-purple-600 to-violet-700 hover:from-purple-500 hover:to-violet-600 text-white font-bold text-sm shadow-lg shadow-purple-950/80 transition-all flex items-center justify-center gap-2 cursor-pointer active:scale-[0.98]"
+            >
+              <ShoppingBag className="w-4 h-4" />
+              <span>Buy Now</span>
+            </button>
+          </div>
 
-      <InfoModal
-        content={infoModalContent}
-        onClose={() => setInfoModalContent(null)}
-      />
+          {/* Trust Badge */}
+          <div className="flex items-center justify-center gap-1.5 text-[10px] text-zinc-500 pt-2">
+            <ShieldCheck className="w-3.5 h-3.5 text-emerald-500" />
+            <span>100% Secure UPI Payment · Instant Telegram Delivery</span>
+          </div>
+
+        </div>
+      </div>
     </div>
   );
-}
+};
