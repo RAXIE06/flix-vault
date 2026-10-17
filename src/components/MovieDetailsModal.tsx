@@ -1,5 +1,5 @@
-import React, { useState, useEffect } from 'react';
-import { X, ShoppingBag, Clock, Film, Shield, Sparkles } from 'lucide-react';
+import React, { useEffect } from 'react';
+import { X, ShoppingBag, Clock, Film, Shield, Sparkles, Languages } from 'lucide-react';
 import { Movie } from '../types';
 import { MoviePosterArt } from './MoviePosterArt';
 
@@ -78,6 +78,23 @@ export const MovieDetailsModal: React.FC<MovieDetailsModalProps> = ({
               {movie.rating}
             </span>
           </div>
+
+          {/* ✅ LANGUAGES ROW */}
+          {movie.languages && movie.languages.length > 0 && (
+            <div className="flex items-center gap-2 pt-1">
+              <Languages className="w-4 h-4 text-emerald-400 shrink-0" />
+              <div className="flex flex-wrap gap-1.5">
+                {movie.languages.map((lang) => (
+                  <span
+                    key={lang}
+                    className="px-2 py-0.5 rounded-md text-[11px] font-semibold bg-emerald-950/60 border border-emerald-800/50 text-emerald-300 tracking-wide"
+                  >
+                    {lang}
+                  </span>
+                ))}
+              </div>
+            </div>
+          )}
 
           {/* Title & Tagline */}
           <div>
