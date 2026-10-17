@@ -16,7 +16,7 @@ import { InfoModal } from './components/InfoModal';
 import { Footer } from './components/Footer';
 import { MyOrdersPage } from './components/MyOrdersPage';
 import { SplashScreen } from './components/SplashScreen';
-import { MoviePosterArt } from './components/MoviePosterArt'; // ✅ Sahi Path
+import { MoviePosterArt } from './components/MoviePosterArt';
 
 const LOCAL_FALLBACK_MOVIES: Movie[] = [];
 
@@ -319,7 +319,7 @@ export default function App() {
           </div>
         )}
 
-        {/* PREMIUM RELEASES — Responsive Grid */}
+        {/* PREMIUM RELEASES — Landscape Grid */}
         {secondaryMovies.length > 0 && (
           <div className="w-full py-8 sm:py-12 bg-[#08070d]">
             <div className="max-w-6xl mx-auto px-3 sm:px-6">
@@ -334,7 +334,7 @@ export default function App() {
                 </p>
               </div>
 
-              {/* Responsive Grid: 2 mobile, 3 tablet, 4 desktop, 5 XL */}
+              {/* Grid: 2 mobile, 3 tablet, 4 desktop, 5 XL — LANDSCAPE posters */}
               <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-3 sm:gap-4">
                 {secondaryMovies.map((movie) => (
                   <button
@@ -342,11 +342,11 @@ export default function App() {
                     onClick={() => setDetailsMovie(movie)}
                     className="group relative rounded-xl overflow-hidden bg-[#0c0915] border border-purple-950/60 hover:border-purple-600/70 transition-all duration-300 hover:shadow-lg hover:shadow-purple-950/50 text-left cursor-pointer flex flex-col"
                   >
-                    {/* Poster Container */}
-                    <div className="relative w-full aspect-[2/3] overflow-hidden bg-black">
+                    {/* Poster Container — LANDSCAPE 16:9 */}
+                    <div className="relative w-full aspect-video overflow-hidden bg-black">
                       <MoviePosterArt
                         movie={movie}
-                        variant="compact"
+                        variant="backdrop"
                         className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-500"
                       />
 
@@ -354,14 +354,14 @@ export default function App() {
                       <div className="absolute inset-0 bg-gradient-to-t from-black/90 via-black/20 to-transparent opacity-90 pointer-events-none" />
 
                       {/* Resolution Badge (Top Right) */}
-                      <div className="absolute top-2 right-2">
+                      <div className="absolute top-1.5 right-1.5 sm:top-2 sm:right-2">
                         <span className="px-1.5 py-0.5 rounded text-[9px] font-mono bg-black/70 backdrop-blur-sm border border-purple-500/30 text-purple-200">
                           {movie.resolution}
                         </span>
                       </div>
 
                       {/* Rating & Price on Poster (Bottom) */}
-                      <div className="absolute bottom-2 left-2 right-2 flex items-center justify-between">
+                      <div className="absolute bottom-1.5 left-1.5 right-1.5 sm:bottom-2 sm:left-2 sm:right-2 flex items-center justify-between">
                         <span className="px-1.5 py-0.5 rounded text-[10px] font-bold bg-purple-600 text-white shadow-md">
                           {movie.priceSample}
                         </span>
@@ -372,8 +372,8 @@ export default function App() {
                     </div>
 
                     {/* Title below poster */}
-                    <div className="p-2.5 bg-[#0c0915]">
-                      <h3 className="text-xs sm:text-sm font-bold text-white line-clamp-2 leading-tight font-['Outfit'] group-hover:text-purple-300 transition-colors">
+                    <div className="p-2 sm:p-2.5 bg-[#0c0915]">
+                      <h3 className="text-[11px] sm:text-xs font-bold text-white truncate leading-tight font-['Outfit'] group-hover:text-purple-300 transition-colors">
                         {movie.title}
                       </h3>
                     </div>
