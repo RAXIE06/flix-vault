@@ -8,7 +8,6 @@ import {
 import { api } from './services/api';
 import { Header } from './components/Header';
 import { FeaturedHero } from './components/FeaturedHero';
-import { MovieRow } from './components/MovieRow';
 import { MovieDetailsModal } from './components/MovieDetailsModal';
 import { PurchaseModal } from './components/PurchaseModal';
 import { AdminAccessModal } from './components/AdminAccessModal';
@@ -17,6 +16,7 @@ import { InfoModal } from './components/InfoModal';
 import { Footer } from './components/Footer';
 import { MyOrdersPage } from './components/MyOrdersPage';
 import { SplashScreen } from './components/SplashScreen';
+import { MoviePosterArt } from './components/MoviePosterArt';
 
 const LOCAL_FALLBACK_MOVIES: Movie[] = [];
 
@@ -132,33 +132,6 @@ export default function App() {
     () => resolveSecondaryMovies(movies, primaryFeaturedMovie?.id),
     [movies, primaryFeaturedMovie]
   );
-
-  // ============================================================
-  // MOVIE ROW DATA — 3 rows
-  // ============================================================
-  const trendingMovies = useMemo(() => {
-    // All secondary movies (as-is order)
-    return secondaryMovies;
-  }, [secondaryMovies]);
-
-  const newReleasesMovies = useMemo(() => {
-    // Sort by year descending (newest first)
-    return [...secondaryMovies].sort((a, b) => (b.year || 0) - (a.year || 0));
-  }, [secondaryMovies]);
-
-  const topRatedMovies = useMemo(() => {
-    // Sort by rating (A rated first, then U/A 16+, U/A 13+, etc.)
-    const ratingOrder: Record<string, number> = {
-      'A': 5,
-      'U/A 16+': 4,
-      'U/A 13+': 3,
-      'U/A 7+': 2,
-      'U': 1,
-    };
-    return [...secondaryMovies].sort(
-      (a, b) => (ratingOrder[b.rating] || 0) - (ratingOrder[a.rating] || 0)
-    );
-  }, [secondaryMovies]);
 
   // ============================================================
   // HANDLERS
@@ -348,38 +321,65 @@ export default function App() {
           </div>
         )}
 
-        {/* MOVIE ROWS */}
+        {/* PREMIUM RELEASES — 3 COLUMN GRID */}
         {secondaryMovies.length > 0 && (
-          <div className="space-y-2 sm:space-y-4 pb-8">
-            {/* Row 1: Trending Now */}
-            <MovieRow
-              title="Trending Now"
-              subtitle="Most watched titles this week"
-              movies={trendingMovies}
-              onBuyNow={(movie) => setPurchaseMovie(movie)}
-              onViewDetails={(movie) => setDetailsMovie(movie)}
-              accentColor="#a855f7"
-            />
+          <div className="w-full py-8 sm:py-12 bg-[#08070d]">
+            <div className="max-w-6xl mx-auto px-4 sm:px-6">
+              
+              {/* Heading */}
+              <div className="mb-5 sm:mb-6">
+                <h2 className="text-xl sm:text-2xl font-bold text-white font-['Outfit']">
+                  Premium Releases
+                </h2>
+                <p className="text-xs text-zinc-500 mt-0.5">
+                  {secondaryMovies.length} titles in the vault
+                </p>
+              </div>
 
-            {/* Row 2: New Releases */}
-            <MovieRow
-              title="New Releases"
-              subtitle="Freshly added to the vault"
-              movies={newReleasesMovies}
-              onBuyNow={(movie) => setPurchaseMovie(movie)}
-              onViewDetails={(movie) => setDetailsMovie(movie)}
-              accentColor="#ec4899"
-            />
+              {/* 3-Column Grid */}
+              <div className="grid grid-cols-3 gap-2.5 sm:gap-4">
+                {secondaryMovies.map((movie) => (
+                  <button
+                    key={movie.id}
+                    onClick={() => setDetailsMovie(movie)}
+                    className="group relative rounded-xl overflow-hidden bg-[#0c0915] border border-purple-950/60 hover:border-purple-600/70 transition-all duration-300 hover:shadow-lg hover:shadow-purple-950/50 text-left cursor-pointer"
+                  >
+                    {/* Poster */}
+                    <div className="relative w-full aspect-[2/3] overflow-hidden bg-black">
+                      <MoviePosterArt
+                        movie={movie}
+                        variant="compact"
+                        className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-500"
+                      />
 
-            {/* Row 3: Top Rated */}
-            <MovieRow
-              title="Top Rated"
-              subtitle="Premium titles with best ratings"
-              movies={topRatedMovies}
-              onBuyNow={(movie) => setPurchaseMovie(movie)}
-              onViewDetails={(movie) => setDetailsMovie(movie)}
-              accentColor="#f59e0b"
-            />
+                      {/* Bottom gradient */}
+                      <div className="absolute inset-0 bg-gradient-to-t from-[#0c0915] via-transparent to-transparent opacity-80" />
+
+                      {/* Resolution badge (top-right) */}
+                      <div className="absolute top-1.5 right-1.5">
+                        <span className="px-1 py-0.5 rounded text-[8px] font-mono bg-black/80 backdrop-blur-md border border-purple-800/50 text-purple-200">
+                          {movie.resolution}
+                        </span>
+                      </div>
+
+                      {/* Price badge (bottom-left) */}
+                      <div className="absolute bottom-1.5 left-1.5">
+                        <span className="px-1.5 py-0.5 rounded-md text-[10px] font-bold bg-gradient-to-r from-purple-600 to-violet-700 text-white shadow-md">
+                          {movie.priceSample}
+                        </span>
+                      </div>
+                    </div>
+
+                    {/* Title */}
+                    <div className="p-2">
+                      <h3 className="text-[11px] sm:text-xs font-bold text-white truncate font-['Outfit'] group-hover:text-purple-300 transition-colors">
+                        {movie.title}
+                      </h3>
+                    </div>
+                  </button>
+                ))}
+              </div>
+            </div>
           </div>
         )}
       </main>
