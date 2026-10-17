@@ -173,13 +173,21 @@ export const EMPTY_FALLBACK: Movie[] = [];
 // ============================================================
 export const GENRES = [
   'All',
-  'Sci-Fi',
-  'Cyberpunk',
-  'Noir',
-  'Thriller',
-  'Drama',
   'Action',
+  'Comedy',
+  'Drama',
+  'Thriller',
+  'Romance',
+  'Horror',
+  'Sci-Fi',
   'Mystery',
+  'Crime',
+  'Adventure',
+  'Family',
+  'Fantasy',
+  'Biography',
+  'Historical',
+  'Musical',
 ] as const;
 
 // ============================================================
