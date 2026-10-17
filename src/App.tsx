@@ -133,9 +133,7 @@ export default function App() {
     [movies, primaryFeaturedMovie]
   );
 
-  // ============================================================
   // HANDLERS
-  // ============================================================
   const handleNavigate = useCallback(
     (sectionId: string) => {
       if (currentRoute === '/my-orders') {
@@ -321,7 +319,7 @@ export default function App() {
           </div>
         )}
 
-        {/* PREMIUM RELEASES — Responsive Grid */}
+        {/* PREMIUM RELEASES — Clean Grid (No duplicate title) */}
         {secondaryMovies.length > 0 && (
           <div className="w-full py-8 sm:py-12 bg-[#08070d]">
             <div className="max-w-6xl mx-auto px-3 sm:px-6">
@@ -336,15 +334,15 @@ export default function App() {
                 </p>
               </div>
 
-              {/* Responsive Grid: 2 mobile, 3 tablet, 4 desktop, 5 XL */}
+              {/* Responsive Grid */}
               <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-3 sm:gap-4">
                 {secondaryMovies.map((movie) => (
                   <button
                     key={movie.id}
                     onClick={() => setDetailsMovie(movie)}
-                    className="group relative rounded-xl overflow-hidden bg-[#0c0915] border border-purple-950/60 hover:border-purple-600/70 transition-all duration-300 hover:shadow-lg hover:shadow-purple-950/50 text-left cursor-pointer flex flex-col"
+                    className="group relative rounded-xl overflow-hidden border border-purple-950/60 hover:border-purple-600/70 transition-all duration-300 hover:shadow-lg hover:shadow-purple-950/50 text-left cursor-pointer"
                   >
-                    {/* Poster Container */}
+                    {/* Poster Container with MoviePosterArt */}
                     <div className="relative w-full aspect-[2/3] overflow-hidden bg-black">
                       <MoviePosterArt
                         movie={movie}
@@ -352,32 +350,12 @@ export default function App() {
                         className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-500"
                       />
 
-                      {/* Dark gradient at bottom for readability */}
-                      <div className="absolute inset-0 bg-gradient-to-t from-black/90 via-black/20 to-transparent opacity-90 pointer-events-none" />
-
-                      {/* Resolution Badge (Top Right) */}
-                      <div className="absolute top-2 right-2">
-                        <span className="px-1.5 py-0.5 rounded text-[9px] font-mono bg-black/70 backdrop-blur-sm border border-purple-500/30 text-purple-200">
-                          {movie.resolution}
-                        </span>
-                      </div>
-
-                      {/* Rating & Price on Poster (Bottom) */}
-                      <div className="absolute bottom-2 left-2 right-2 flex items-center justify-between">
-                        <span className="px-1.5 py-0.5 rounded text-[10px] font-bold bg-purple-600 text-white shadow-md">
+                      {/* Price Badge (Top Right) */}
+                      <div className="absolute top-2 right-2 z-10">
+                        <span className="px-1.5 py-0.5 rounded-md text-[10px] font-bold bg-gradient-to-r from-purple-600 to-violet-700 text-white shadow-md">
                           {movie.priceSample}
                         </span>
-                        <span className="px-1 py-0.5 rounded text-[9px] font-mono bg-black/60 text-zinc-300 border border-zinc-700">
-                          {movie.rating}
-                        </span>
                       </div>
-                    </div>
-
-                    {/* Title below poster */}
-                    <div className="p-2.5 bg-[#0c0915]">
-                      <h3 className="text-xs sm:text-sm font-bold text-white line-clamp-2 leading-tight font-['Outfit'] group-hover:text-purple-300 transition-colors">
-                        {movie.title}
-                      </h3>
                     </div>
                   </button>
                 ))}
