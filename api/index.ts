@@ -259,7 +259,7 @@ async function generateTelegramInviteLink(
 }
 
 // ============================================================
-// GMAIL IMAP — FamApp Payment Verification
+// GMAIL IMAP — FamApp + FamPay + Slice Payment Verification
 // ============================================================
 interface FamAppParsedAlert {
   isValid: boolean;
@@ -269,16 +269,50 @@ interface FamAppParsedAlert {
   sender?: string;
   receivedAt?: Date;
   detectionReason?: string;
+  provider?: 'famapp' | 'fampay' | 'slice' | 'unknown';
 }
 
+// ✅ MODIFIED: multi-sender support
 function getGmailConfig() {
+  const primary = (process.env.GMAIL_VERIFIED_SENDER || 'no-reply@famapp.in').trim();
+  const additionalRaw = (
+    process.env.GMAIL_ADDITIONAL_SENDERS ??
+    'slice.bank.in,noreply@slice.bank.in,no-reply@famapp.in,no-replay@famapp.in,famapp.in,fampay.in,fampay.club'
+  ).trim();
+  const additional = additionalRaw
+    .split(',')
+    .map((s) => s.trim().toLowerCase())
+    .filter(Boolean);
+  const verifiedSenders = Array.from(new Set([primary.toLowerCase(), ...additional]));
+
   return {
     user: process.env.GMAIL_USER || '',
     appPassword: process.env.GMAIL_APP_PASSWORD || '',
     host: process.env.GMAIL_IMAP_HOST || 'imap.gmail.com',
     port: parseInt(process.env.GMAIL_IMAP_PORT || '993', 10),
-    verifiedSender: process.env.GMAIL_VERIFIED_SENDER || 'no-reply@famapp.in',
+    verifiedSender: primary,
+    verifiedSenders,
   };
+}
+
+// ✅ NEW: provider detection
+function detectProvider(from: string): 'famapp' | 'fampay' | 'slice' | 'unknown' {
+  const s = (from || '').toLowerCase();
+  if (s.includes('slice')) return 'slice';
+  if (s.includes('famapp')) return 'famapp';
+  if (s.includes('fampay')) return 'fampay';
+  return 'unknown';
+}
+
+// ✅ NEW: multi-sender allowlist check
+function isAllowedSender(rawFrom: string, allowedSenders: string[]): boolean {
+  const senderLower = (rawFrom || '').toLowerCase();
+  if (!senderLower || !senderLower.includes('@')) return false;
+  for (const allowed of allowedSenders) {
+    const al = (allowed || '').toLowerCase().trim();
+    if (al && senderLower.includes(al)) return true;
+  }
+  return false;
 }
 
 function isGmailConfigured(): boolean {
@@ -286,19 +320,61 @@ function isGmailConfigured(): boolean {
   return !!(c.user && c.appPassword);
 }
 
+// ✅ MODIFIED: Slice branch + multi-sender allowlist
 function parseFamAppEmail(from: string, subject: string, text: string): FamAppParsedAlert {
   const config = getGmailConfig();
   const result: FamAppParsedAlert = { isValid: false, sender: from };
 
-  const senderLower = (from || '').toLowerCase();
-  const verifiedLower = config.verifiedSender.toLowerCase();
-  if (!senderLower.includes(verifiedLower)) {
+  if (!isAllowedSender(from, config.verifiedSenders)) {
     result.detectionReason = `Sender mismatch: ${from}`;
     return result;
   }
 
+  const provider = detectProvider(from);
+  result.provider = provider;
   const body = text || '';
+  const combined = `${subject}\n${body}`;
 
+  // ===== SLICE BRANCH =====
+  if (provider === 'slice') {
+    // Reject debit emails (money OUT, not a payment TO us)
+    if (
+      /debited\s+from\s+your\s+slice\s+account/i.test(combined) ||
+      /₹\s*[\d.]+\s*debited/i.test(combined)
+    ) {
+      result.detectionReason = 'Slice debit (money out) — not a payment';
+      return result;
+    }
+
+    const amountMatch =
+      combined.match(/Received\s+₹\s*([\d,]+(?:\.\d{1,2})?)/i) ||
+      combined.match(/₹\s*([\d,]+(?:\.\d{1,2})?)/);
+    if (!amountMatch) {
+      result.detectionReason = 'Slice amount not found';
+      return result;
+    }
+    const amount = parseFloat(amountMatch[1].replace(/,/g, ''));
+    if (isNaN(amount) || amount <= 0) {
+      result.detectionReason = 'Slice amount parse failed';
+      return result;
+    }
+    result.amount = amount;
+
+    const utrMatch =
+      body.match(/UTR[:\s#-]*(\d{12})/i) ||
+      body.match(/(?:Transaction|Txn|Ref|Reference)\s*(?:ID|No|Number)?[:\s#-]*([A-Z0-9]{8,24})/i) ||
+      body.match(/\b(\d{12})\b/);
+    if (utrMatch) result.utr = utrMatch[1];
+
+    if (/received/i.test(combined)) {
+      result.isValid = true;
+      return result;
+    }
+    result.detectionReason = 'Slice: no success keyword';
+    return result;
+  }
+
+  // ===== FAMPAY / FAMAPP BRANCH =====
   const amountPatterns = [
     /₹\s*([\d,]+\.?\d*)/,
     /Rs\.?\s*([\d,]+\.?\d*)/i,
@@ -425,6 +501,7 @@ async function testGmailImapConnection() {
   }
 }
 
+// ✅ MODIFIED: better matching + more helpful details
 async function runPaymentVerificationScan(limit: number = 20) {
   const start = Date.now();
   const details: any[] = [];
@@ -466,18 +543,29 @@ async function runPaymentVerificationScan(limit: number = 20) {
       const parsed = parseFamAppEmail(email.from, email.subject, email.text);
 
       if (!parsed.isValid || !parsed.amount) {
-        details.push({ emailSubject: email.subject, status: 'skipped', reason: parsed.detectionReason || 'Invalid' });
+        details.push({
+          emailSubject: email.subject,
+          sender: email.from,
+          provider: detectProvider(email.from),
+          status: 'skipped',
+          reason: parsed.detectionReason || 'Invalid',
+        });
         continue;
       }
 
       if (parsed.utr && usedUtrs.has(parsed.utr)) {
         duplicatesRejectedCount++;
-        details.push({ emailSubject: email.subject, status: 'duplicate', reason: `UTR ${parsed.utr} reused` });
+        details.push({
+          emailSubject: email.subject,
+          status: 'duplicate',
+          reason: `UTR ${parsed.utr} reused`,
+        });
         continue;
       }
 
       let matchedOrder: any = null;
       for (const order of pendingOrders) {
+        if (order.status !== 'pending') continue;
         if (Math.abs(order.payableAmount - parsed.amount) < 0.01) {
           matchedOrder = order;
           break;
@@ -486,23 +574,47 @@ async function runPaymentVerificationScan(limit: number = 20) {
 
       if (!matchedOrder) {
         ordersNeedsReviewCount++;
-        details.push({ emailSubject: email.subject, status: 'no_match', amount: parsed.amount, utr: parsed.utr });
+        const availableAmounts = pendingOrders
+          .filter((o: any) => o.status === 'pending')
+          .map((o: any) => o.payableAmount);
+        details.push({
+          emailSubject: email.subject,
+          sender: email.from,
+          provider: detectProvider(email.from),
+          status: 'no_match',
+          amount: parsed.amount,
+          utr: parsed.utr || null,
+          availablePendingAmounts: availableAmounts.slice(0, 10),
+          hint:
+            availableAmounts.length === 0
+              ? 'No pending orders in the last 30 minutes'
+              : `No pending order matches ₹${parsed.amount}. Available: ${availableAmounts
+                  .slice(0, 5)
+                  .join(', ')}`,
+        });
         continue;
       }
 
       matchedOrder.status = 'verified';
       matchedOrder.verifiedAt = new Date();
-      matchedOrder.matchedUtr = parsed.utr || 'AUTO-VERIFIED';
-      matchedOrder.maskedUtr = matchedOrder.matchedUtr.slice(0, 4) + '****' + matchedOrder.matchedUtr.slice(-4);
+      matchedOrder.matchedUtr = parsed.utr || `AUTO-${matchedOrder.orderId}`;
+      matchedOrder.maskedUtr = parsed.utr
+        ? parsed.utr.slice(0, 4) + '****' + parsed.utr.slice(-4)
+        : 'NO-UTR';
       matchedOrder.fampayTxnId = parsed.fampayTxnId || '';
       matchedOrder.matchedAmountRupees = parsed.amount;
       matchedOrder.matchedAmountPaise = Math.round(parsed.amount * 100);
-      matchedOrder.verificationReason = `Auto-verified via FamApp email`;
+      matchedOrder.verificationReason = parsed.utr
+        ? `Auto-verified via ${detectProvider(email.from)} email (UTR match)`
+        : `Auto-verified via ${detectProvider(email.from)} email (amount+time match, no UTR)`;
 
       if (!matchedOrder.telegramInviteLink) {
         const movie = await MovieModel.findOne({ id: matchedOrder.movieId }).lean();
         if (movie?.telegramChannelId) {
-          const link = await generateTelegramInviteLink(movie.telegramChannelId, matchedOrder.orderId);
+          const link = await generateTelegramInviteLink(
+            movie.telegramChannelId,
+            matchedOrder.orderId
+          );
           if (link) {
             matchedOrder.telegramInviteLink = link;
             matchedOrder.telegramInviteGeneratedAt = new Date();
@@ -513,7 +625,16 @@ async function runPaymentVerificationScan(limit: number = 20) {
       await matchedOrder.save();
       if (parsed.utr) usedUtrs.add(parsed.utr);
       ordersVerifiedCount++;
-      details.push({ emailSubject: email.subject, status: 'verified', orderId: matchedOrder.orderId, amount: parsed.amount });
+      details.push({
+        emailSubject: email.subject,
+        sender: email.from,
+        provider: detectProvider(email.from),
+        status: 'verified',
+        orderId: matchedOrder.orderId,
+        amount: parsed.amount,
+        utr: parsed.utr || null,
+        verificationMethod: parsed.utr ? 'utr_match' : 'amount_time_match',
+      });
     }
 
     return {
@@ -589,6 +710,7 @@ app.get('/api/health', async (_req, res) => {
     },
     gmail: {
       configured: isGmailConfigured(),
+      verifiedSenders: getGmailConfig().verifiedSenders,
     },
     cron: {
       configured: !!process.env.CRON_SECRET,
@@ -715,7 +837,6 @@ app.post('/api/orders/create', async (req, res) => {
     const expiresAt = new Date(Date.now() + 5 * 60 * 1000);
 
     const amountStr = payableAmount.toFixed(2);
-    // ✅ Clean UPI URI — no special chars, spaces replaced with underscores
     const cleanPayeeName = payeeName.trim().replace(/\s+/g, '_');
     const cleanVpa = upiVpa.trim();
     const cleanOrderId = orderId.replace(/[^A-Za-z0-9-]/g, '');
@@ -1283,7 +1404,6 @@ app.get('/api/admin/analytics', requireAdmin, async (_req, res) => {
 
     const allOrders = await OrderModel.find({}).lean();
 
-    // Fetch current movie titles (not snapshots)
     const uniqueMovieIds = Array.from(
       new Set(allOrders.map((o: any) => o.movieId).filter(Boolean))
     ) as string[];
@@ -1436,6 +1556,7 @@ app.get('/api/admin/gmail/status', requireAdmin, (_req, res) => {
     host: config.host,
     port: config.port,
     verifiedSender: config.verifiedSender,
+    verifiedSenders: config.verifiedSenders,
     message: isGmailConfigured() ? 'Gmail IMAP configured.' : 'Set GMAIL_USER and GMAIL_APP_PASSWORD.',
   });
 });
