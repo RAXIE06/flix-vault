@@ -1,19 +1,6 @@
 /**
  * FlixVault Payment Verification Engine (Phase 3B)
- * 
- * Automatically verifies UPI pay-per-movie orders against FamApp payment alert emails.
- * 
- * Safety & Security Guarantees:
- * - Compares exact integer paise expected for the order against parsed alert paise.
- * - Extracts and stores UTR and FamApp transaction ID.
- * - Strictly rejects duplicate UTRs and duplicate FamApp transaction IDs across all orders.
- * - Enforces order payment window: payments received after expiration are rejected.
- * - Accepts only emails from verified FamApp/FamPay senders with SUCCESS status.
- * - Prevents false matches: refuses to match by amount alone without unique reference.
- * - If order association is ambiguous, preserves order as pending/needs_review.
- * - Idempotent: repeated email processing does not re-credit or corrupt orders.
- * - Safe concurrency: atomic updates prevent race conditions and duplicate crediting.
- * - Keeps credentials and raw email bodies strictly server-side.
+ * Now supports FamApp, FamPay, and Slice Bank senders.
  */
 
 import { OrderModel, IOrderDoc } from './models/Order';
@@ -44,6 +31,8 @@ export interface VerificationResult {
   isExpired?: boolean;
   isAmbiguous?: boolean;
   isIdempotent?: boolean;
+  matchedSender?: string;
+  verificationMethod?: 'utr_match' | 'amount_time_match';
 }
 
 export interface VerificationScanSummary {
@@ -57,26 +46,35 @@ export interface VerificationScanSummary {
   error?: string;
 }
 
-// Concurrency lock to prevent concurrent verification scans
-let isVerificationScanRunning = false;
+// NEW: Allowed sender domains — add/remove here
+const ALLOWED_SENDER_DOMAINS = ['famapp.in', 'fampay.in', 'slice.bank.in'];
 
 /**
- * Masks 12-digit UTR for safe display
- * e.g. "428691827364" -> "4286****7364"
+ * NEW: Direct domain check, independent of parser flag
+ * This lets Slice emails through even if fampayParser.ts hasn't been updated yet.
  */
+function isAllowedSenderDomain(fromAddress: string): boolean {
+  const f = (fromAddress || '').toLowerCase();
+  return ALLOWED_SENDER_DOMAINS.some((d) => f.includes(d));
+}
+
+/**
+ * NEW: Detect Slice bank sender
+ */
+function isSliceSender(fromAddress: string): boolean {
+  return (fromAddress || '').toLowerCase().includes('slice.bank.in');
+}
+
+let isVerificationScanRunning = false;
+
 export function maskUtr(utr?: string | null): string {
   if (!utr) return '—';
   const clean = utr.trim();
   if (clean.length <= 4) return clean;
-  if (clean.length <= 8) {
-    return `${clean.slice(0, 2)}****${clean.slice(-2)}`;
-  }
+  if (clean.length <= 8) return `${clean.slice(0, 2)}****${clean.slice(-2)}`;
   return `${clean.slice(0, 4)}****${clean.slice(-4)}`;
 }
 
-/**
- * Normalizes an order's expected amount to integer paise
- */
 export function getOrderExpectedPaise(order: any): number {
   if (order.expectedAmountPaise && Number.isInteger(order.expectedAmountPaise)) {
     return order.expectedAmountPaise;
@@ -87,10 +85,6 @@ export function getOrderExpectedPaise(order: any): number {
   return 0;
 }
 
-/**
- * Checks whether an order is within its permitted payment window
- * Allows a 2-minute grace period for server clock drift
- */
 export function isWithinPaymentWindow(
   order: any,
   paymentDate: Date,
@@ -107,80 +101,45 @@ export function isWithinPaymentWindow(
       reason: `Payment timestamp (${paymentDate.toISOString()}) is outside permitted window. Order expired at ${new Date(order.expiresAt).toISOString()}.`,
     };
   }
-
   if (paymentTime < createdAtTime) {
     return {
       valid: false,
       reason: `Payment timestamp (${paymentDate.toISOString()}) predates order creation (${new Date(order.createdAt).toISOString()}).`,
     };
   }
-
   return { valid: true };
 }
 
-/**
- * Finds an order in MongoDB or memoryStore by orderId
- */
 export async function findOrderById(orderId: string): Promise<any | null> {
   const dbStatus = getDBStatus();
-  if (dbStatus.connected) {
-    return await OrderModel.findOne({ orderId }).lean();
-  }
+  if (dbStatus.connected) return await OrderModel.findOne({ orderId }).lean();
   return memoryStore.orders.find((o: any) => o.orderId === orderId) || null;
 }
 
-/**
- * Finds an order with a duplicate matched UTR (excluding current orderId)
- */
-export async function findOrderByUtr(
-  utr: string,
-  excludeOrderId?: string
-): Promise<any | null> {
+export async function findOrderByUtr(utr: string, excludeOrderId?: string): Promise<any | null> {
   if (!utr) return null;
   const dbStatus = getDBStatus();
   if (dbStatus.connected) {
-    const query: any = {
-      matchedUtr: utr,
-      ...(excludeOrderId ? { orderId: { $ne: excludeOrderId } } : {}),
-    };
+    const query: any = { matchedUtr: utr, ...(excludeOrderId ? { orderId: { $ne: excludeOrderId } } : {}) };
     return await OrderModel.findOne(query).lean();
   }
-  return (
-    memoryStore.orders.find(
-      (o: any) =>
-        o.matchedUtr === utr && (!excludeOrderId || o.orderId !== excludeOrderId)
-    ) || null
-  );
+  return memoryStore.orders.find(
+    (o: any) => o.matchedUtr === utr && (!excludeOrderId || o.orderId !== excludeOrderId)
+  ) || null;
 }
 
-/**
- * Finds an order with a duplicate FamApp Txn ID (excluding current orderId)
- */
-export async function findOrderByFamPayTxnId(
-  fampayTxnId: string,
-  excludeOrderId?: string
-): Promise<any | null> {
+export async function findOrderByFamPayTxnId(fampayTxnId: string, excludeOrderId?: string): Promise<any | null> {
   if (!fampayTxnId) return null;
   const dbStatus = getDBStatus();
   if (dbStatus.connected) {
-    const query: any = {
-      fampayTxnId,
-      ...(excludeOrderId ? { orderId: { $ne: excludeOrderId } } : {}),
-    };
+    const query: any = { fampayTxnId, ...(excludeOrderId ? { orderId: { $ne: excludeOrderId } } : {}) };
     return await OrderModel.findOne(query).lean();
   }
-  return (
-    memoryStore.orders.find(
-      (o: any) =>
-        o.fampayTxnId === fampayTxnId &&
-        (!excludeOrderId || o.orderId !== excludeOrderId)
-    ) || null
-  );
+  return memoryStore.orders.find(
+    (o: any) => o.fampayTxnId === fampayTxnId && (!excludeOrderId || o.orderId !== excludeOrderId)
+  ) || null;
 }
 
-/**
- * Atomically updates an order's verification status
- */
 export async function updateOrderVerification(
   orderId: string,
   updates: {
@@ -194,21 +153,20 @@ export async function updateOrderVerification(
     verifiedAt?: Date;
     verificationReason: string;
     matchedEmailUid?: number;
+    verificationMethod?: 'utr_match' | 'amount_time_match';
   }
 ): Promise<boolean> {
   const dbStatus = getDBStatus();
 
   if (dbStatus.connected) {
-    // If marking verified, perform atomic update to avoid concurrent double crediting
     const filter: any = { orderId };
     if (updates.status === 'verified') {
       filter.$or = [
         { status: 'pending' },
         { status: 'needs_review' },
-        { matchedUtr: updates.matchedUtr }, // Idempotency
+        { matchedUtr: updates.matchedUtr },
       ];
     }
-
     const res = await OrderModel.updateOne(filter, {
       $set: {
         status: updates.status,
@@ -221,16 +179,14 @@ export async function updateOrderVerification(
         ...(updates.verifiedAt ? { verifiedAt: updates.verifiedAt } : {}),
         verificationReason: updates.verificationReason,
         verificationSource: 'gmail_imap',
+        ...(updates.verificationMethod ? { verificationMethod: updates.verificationMethod } : {}),
         ...(updates.matchedEmailUid ? { matchedEmailUid: updates.matchedEmailUid } : {}),
       },
     });
-
     return res.modifiedCount > 0 || res.matchedCount > 0;
   } else {
-    // In-memory update
     const idx = memoryStore.orders.findIndex((o: any) => o.orderId === orderId);
     if (idx === -1) return false;
-
     const existing = memoryStore.orders[idx];
     Object.assign(existing, {
       status: updates.status,
@@ -243,6 +199,7 @@ export async function updateOrderVerification(
       ...(updates.verifiedAt ? { verifiedAt: updates.verifiedAt } : {}),
       verificationReason: updates.verificationReason,
       verificationSource: 'gmail_imap',
+      ...(updates.verificationMethod ? { verificationMethod: updates.verificationMethod } : {}),
       ...(updates.matchedEmailUid ? { matchedEmailUid: updates.matchedEmailUid } : {}),
       updatedAt: new Date(),
     });
@@ -250,9 +207,6 @@ export async function updateOrderVerification(
   }
 }
 
-/**
- * Core Matching Algorithm for a single order and parsed FamPay alert
- */
 export async function verifyOrderWithAlert(
   order: any,
   alert: FamPayDiagnosticResult,
@@ -260,23 +214,20 @@ export async function verifyOrderWithAlert(
     emailDate?: Date | string;
     emailUid?: number;
     allowDirectIdMatch?: boolean;
+    sliceNoUtrFallback?: boolean;
   } = {}
 ): Promise<VerificationResult> {
   const orderId = order.orderId;
   const expectedPaise = getOrderExpectedPaise(order);
 
-  // 1. Sender Verification
-  if (!alert.isVerifiedSender) {
-    const reason = `Rejected: Alert sender "${alert.senderAddress || 'unknown'}" is not in the verified FamPay sender allowlist.`;
-    return {
-      success: false,
-      orderId,
-      status: 'needs_review',
-      reason,
-    };
+  // 1. Sender check — bypass parser flag, check domain directly
+  const senderAddr = alert.senderAddress || '';
+  if (!isAllowedSenderDomain(senderAddr) && !alert.isVerifiedSender) {
+    const reason = `Rejected: Alert sender "${senderAddr || 'unknown'}" is not in the verified sender allowlist.`;
+    return { success: false, orderId, status: 'needs_review', reason };
   }
 
-  // 2. Status Check
+  // 2. Status check
   if (alert.detectedStatus !== 'SUCCESS') {
     const reason = `Rejected: Alert status is ${alert.detectedStatus}, not a verified successful payment credit.`;
     return {
@@ -287,7 +238,7 @@ export async function verifyOrderWithAlert(
     };
   }
 
-  // 3. Required Fields Check
+  // 3. Amount required
   if (!alert.detectedAmount) {
     return {
       success: false,
@@ -297,7 +248,14 @@ export async function verifyOrderWithAlert(
     };
   }
 
-  if (!alert.detectedUtr) {
+  const actualPaise = alert.detectedAmount.amountInPaise;
+  const detectedUtr = alert.detectedUtr;
+  const maskedUtrStr = detectedUtr ? maskUtr(detectedUtr) : '—';
+  const fampayTxnId = alert.fampayTxnId || undefined;
+  const slice = isSliceSender(senderAddr);
+
+  // 4. UTR check — for Slice, allow fallback if no UTR
+  if (!detectedUtr && !(slice && options.sliceNoUtrFallback)) {
     return {
       success: false,
       orderId,
@@ -306,18 +264,13 @@ export async function verifyOrderWithAlert(
     };
   }
 
-  const actualPaise = alert.detectedAmount.amountInPaise;
-  const detectedUtr = alert.detectedUtr;
-  const maskedUtrStr = maskUtr(detectedUtr);
-  const fampayTxnId = alert.fampayTxnId || undefined;
-
-  // 4. Idempotency Check
-  if (order.status === 'verified' && order.matchedUtr === detectedUtr) {
+  // 5. Idempotency
+  if (order.status === 'verified' && detectedUtr && order.matchedUtr === detectedUtr) {
     return {
       success: true,
       orderId,
       status: 'verified',
-      reason: `Order already verified with UTR ${maskedUtrStr} (idempotent duplicate email).`,
+      reason: `Order already verified with UTR ${maskedUtrStr} (idempotent).`,
       matchedAmountPaise: actualPaise,
       expectedAmountPaise: expectedPaise,
       utr: detectedUtr,
@@ -332,31 +285,33 @@ export async function verifyOrderWithAlert(
     return await updateOrderVerification(orderId, updates);
   };
 
-  // 5. Duplicate UTR check across all orders
-  const existingWithUtr = await findOrderByUtr(detectedUtr, orderId);
-  if (existingWithUtr) {
-    const reason = `Duplicate UTR: ${maskedUtrStr} was already used to verify order ${existingWithUtr.orderId}. Reusing transaction references is strictly forbidden.`;
-    await applyUpdates({
-      status: 'needs_review',
-      verificationReason: reason,
-      maskedUtr: maskedUtrStr,
-    });
-    return {
-      success: false,
-      orderId,
-      status: 'needs_review',
-      reason,
-      isDuplicateUtr: true,
-      utr: detectedUtr,
-      maskedUtr: maskedUtrStr,
-    };
+  // 6. Duplicate UTR
+  if (detectedUtr) {
+    const existingWithUtr = await findOrderByUtr(detectedUtr, orderId);
+    if (existingWithUtr) {
+      const reason = `Duplicate UTR: ${maskedUtrStr} was already used to verify order ${existingWithUtr.orderId}.`;
+      await applyUpdates({
+        status: 'needs_review',
+        verificationReason: reason,
+        maskedUtr: maskedUtrStr,
+      });
+      return {
+        success: false,
+        orderId,
+        status: 'needs_review',
+        reason,
+        isDuplicateUtr: true,
+        utr: detectedUtr,
+        maskedUtr: maskedUtrStr,
+      };
+    }
   }
 
-  // 6. Duplicate FamApp Txn ID check across all orders
+  // 7. Duplicate Txn ID
   if (fampayTxnId) {
     const existingWithTxn = await findOrderByFamPayTxnId(fampayTxnId, orderId);
     if (existingWithTxn) {
-      const reason = `Duplicate FamApp Txn ID: ${fampayTxnId} was already recorded for order ${existingWithTxn.orderId}.`;
+      const reason = `Duplicate Txn ID: ${fampayTxnId} already recorded for order ${existingWithTxn.orderId}.`;
       await applyUpdates({
         status: 'needs_review',
         verificationReason: reason,
@@ -373,7 +328,7 @@ export async function verifyOrderWithAlert(
     }
   }
 
-  // 7. Payment Window / Expiration Check
+  // 8. Payment window
   const paymentTimestamp = alert.detectedTimestamp
     ? new Date(alert.detectedTimestamp)
     : options.emailDate
@@ -399,13 +354,7 @@ export async function verifyOrderWithAlert(
     };
   }
 
-  // 8. Prevent False Matches (Requirement 2)
-  // "Do not match an email to an order using amount alone.
-  //  Use the unique payment reference in the checkout instructions where available.
-  //  If the current order design cannot reliably associate an incoming email with one specific order,
-  //  keep the order pending and report the ambiguity in the admin dashboard.
-  //  Never automatically assign one email to multiple orders."
-
+  // 9. Ambiguity check (order ref)
   const hasExplicitOrderRef =
     alert.detectedOrderRef === orderId ||
     (alert.subject && alert.subject.includes(orderId)) ||
@@ -414,7 +363,7 @@ export async function verifyOrderWithAlert(
   if (!hasExplicitOrderRef && !options.allowDirectIdMatch) {
     const reason = `Ambiguous match: Payment alert of ₹${(actualPaise / 100).toFixed(
       2
-    )} (UTR: ${maskedUtrStr}) lacks unique payment reference (${orderId}). Cannot verify by amount alone. Requires admin review.`;
+    )} (UTR: ${maskedUtrStr}) lacks unique payment reference (${orderId}). Requires admin review.`;
     await applyUpdates({
       status: 'needs_review',
       verificationReason: reason,
@@ -427,18 +376,16 @@ export async function verifyOrderWithAlert(
       status: 'needs_review',
       reason,
       isAmbiguous: true,
-      utr: detectedUtr,
+      utr: detectedUtr || undefined,
       maskedUtr: maskedUtrStr,
     };
   }
 
-  // 9. Exact Integer Paise Match
+  // 10. Exact paise match
   if (actualPaise !== expectedPaise) {
-    const reason = `Amount mismatch: Order ${orderId} expected exactly ₹${(expectedPaise / 100).toFixed(
+    const reason = `Amount mismatch: Order expected ₹${(expectedPaise / 100).toFixed(
       2
-    )} (${expectedPaise} paise), but received ₹${(actualPaise / 100).toFixed(
-      2
-    )} (${actualPaise} paise).`;
+    )} (${expectedPaise} paise), received ₹${(actualPaise / 100).toFixed(2)} (${actualPaise} paise).`;
     await applyUpdates({
       status: 'needs_review',
       verificationReason: reason,
@@ -454,28 +401,31 @@ export async function verifyOrderWithAlert(
       reason,
       expectedAmountPaise: expectedPaise,
       matchedAmountPaise: actualPaise,
-      utr: detectedUtr,
+      utr: detectedUtr || undefined,
       maskedUtr: maskedUtrStr,
     };
   }
 
-  // 10. SUCCESSFUL MATCH — Atomically mark verified
+  // 11. SUCCESS
   const verifiedAt = new Date();
-  const successReason = `Payment verified automatically via FamApp alert email. Exact amount ₹${(
-    actualPaise / 100
-  ).toFixed(2)} (${actualPaise} paise) matched with UTR ${maskedUtrStr}.`;
+  const method: 'utr_match' | 'amount_time_match' = detectedUtr ? 'utr_match' : 'amount_time_match';
+  const successReason = detectedUtr
+    ? `Payment verified. Exact amount ₹${(actualPaise / 100).toFixed(2)} matched with UTR ${maskedUtrStr}.`
+    : `Payment verified via Slice amount+time match. Amount ₹${(actualPaise / 100).toFixed(
+        2
+      )} matched within order window (no UTR available).`;
 
   const updated = await applyUpdates({
     status: 'verified',
     matchedAmountPaise: actualPaise,
     matchedAmountRupees: actualPaise / 100,
-    matchedUtr: detectedUtr,
-    maskedUtr: maskedUtrStr,
+    ...(detectedUtr ? { matchedUtr: detectedUtr, maskedUtr: maskedUtrStr } : {}),
     fampayTxnId,
     paymentTimestamp,
     verifiedAt,
     verificationReason: successReason,
     matchedEmailUid: options.emailUid,
+    verificationMethod: method,
   });
 
   if (!updated) {
@@ -483,7 +433,7 @@ export async function verifyOrderWithAlert(
       success: false,
       orderId,
       status: 'needs_review',
-      reason: 'Failed to atomically update order verification status (concurrent state conflict).',
+      reason: 'Failed to atomically update order (concurrent state conflict).',
     };
   }
 
@@ -494,19 +444,15 @@ export async function verifyOrderWithAlert(
     reason: successReason,
     matchedAmountPaise: actualPaise,
     expectedAmountPaise: expectedPaise,
-    utr: detectedUtr,
+    utr: detectedUtr || undefined,
     maskedUtr: maskedUtrStr,
     fampayTxnId,
     paymentTimestamp: paymentTimestamp.toISOString(),
+    matchedSender: senderAddr,
+    verificationMethod: method,
   };
 }
 
-/**
- * Matches an incoming email alert against all pending orders.
- * Strictly adheres to Requirement 2:
- * - If multiple orders share the amount and email lacks order reference, marks all ambiguous.
- * - Never credits multiple orders with one email.
- */
 export async function matchAlertAgainstPendingOrders(
   alert: FamPayDiagnosticResult,
   rawMeta: { emailDate?: Date | string; emailUid?: number } = {}
@@ -524,11 +470,9 @@ export async function matchAlertAgainstPendingOrders(
     );
   }
 
-  if (pendingOrders.length === 0) {
-    return null;
-  }
+  if (pendingOrders.length === 0) return null;
 
-  // Check 1: Does the email contain an explicit order reference?
+  // Explicit order ref
   if (alert.detectedOrderRef) {
     const matchingOrder = pendingOrders.find(
       (o) => o.orderId.toUpperCase() === alert.detectedOrderRef?.toUpperCase()
@@ -538,26 +482,35 @@ export async function matchAlertAgainstPendingOrders(
         emailDate: rawMeta.emailDate,
         emailUid: rawMeta.emailUid,
         allowDirectIdMatch: true,
+        sliceNoUtrFallback: true,
       });
     }
   }
 
-  // Check 2: If no explicit order reference, find orders with matching amount
+  // Amount-based matching
   if (alert.detectedAmount) {
     const alertPaise = alert.detectedAmount.amountInPaise;
-    const sameAmountOrders = pendingOrders.filter(
-      (o) => getOrderExpectedPaise(o) === alertPaise
-    );
+    const sameAmountOrders = pendingOrders.filter((o) => getOrderExpectedPaise(o) === alertPaise);
+    const slice = isSliceSender(alert.senderAddress || '');
+    const noUtr = !alert.detectedUtr;
 
     if (sameAmountOrders.length === 1) {
-      // Single order with same amount, BUT email lacks order reference
-      // As required by Phase 3B: "Do not match an email to an order using amount alone... report the ambiguity in the admin dashboard"
       const order = sameAmountOrders[0];
+
+      // NEW: Slice fallback — no UTR + exactly 1 pending order + amount match → verify
+      if (slice && noUtr) {
+        return await verifyOrderWithAlert(order, alert, {
+          emailDate: rawMeta.emailDate,
+          emailUid: rawMeta.emailUid,
+          allowDirectIdMatch: true,
+          sliceNoUtrFallback: true,
+        });
+      }
+
       const masked = maskUtr(alert.detectedUtr);
       const reason = `Ambiguous match: Payment alert of ₹${(alertPaise / 100).toFixed(
         2
-      )} (UTR: ${masked}) has no unique order reference. Cannot verify by amount alone. Requires admin review.`;
-
+      )} (UTR: ${masked}) has no unique order reference. Requires admin review.`;
       await updateOrderVerification(order.orderId, {
         status: 'needs_review',
         verificationReason: reason,
@@ -568,7 +521,6 @@ export async function matchAlertAgainstPendingOrders(
       });
       order.status = 'needs_review';
       order.verificationReason = reason;
-
       return {
         success: false,
         orderId: order.orderId,
@@ -579,14 +531,10 @@ export async function matchAlertAgainstPendingOrders(
         maskedUtr: masked,
       };
     } else if (sameAmountOrders.length > 1) {
-      // Multiple orders with same amount!
       const masked = maskUtr(alert.detectedUtr);
       const reason = `Ambiguous match: Multiple orders (${sameAmountOrders
         .map((o) => o.orderId)
-        .join(', ')}) share payable amount ₹${(alertPaise / 100).toFixed(
-        2
-      )}. Email lacks order reference. Never assigning to multiple orders.`;
-
+        .join(', ')}) share amount ₹${(alertPaise / 100).toFixed(2)}. Never assigning to multiple orders.`;
       for (const order of sameAmountOrders) {
         await updateOrderVerification(order.orderId, {
           status: 'needs_review',
@@ -598,7 +546,6 @@ export async function matchAlertAgainstPendingOrders(
         order.status = 'needs_review';
         order.verificationReason = reason;
       }
-
       return {
         success: false,
         orderId: sameAmountOrders[0].orderId,
@@ -614,13 +561,7 @@ export async function matchAlertAgainstPendingOrders(
   return null;
 }
 
-/**
- * Executes a full IMAP Payment Verification Scan across recent emails.
- * Protected by a single-flight concurrency lock.
- */
-export async function runPaymentVerificationScan(
-  limit: number = 20
-): Promise<VerificationScanSummary> {
+export async function runPaymentVerificationScan(limit: number = 20): Promise<VerificationScanSummary> {
   if (isVerificationScanRunning) {
     return {
       success: false,
@@ -630,7 +571,7 @@ export async function runPaymentVerificationScan(
       duplicatesRejectedCount: 0,
       details: [],
       durationMs: 0,
-      error: 'Another payment verification scan is currently running. Please wait for it to finish.',
+      error: 'Another scan is currently running.',
     };
   }
 
@@ -648,7 +589,7 @@ export async function runPaymentVerificationScan(
       duplicatesRejectedCount: 0,
       details: [],
       durationMs: 0,
-      error: 'Gmail IMAP credentials (GMAIL_USER and GMAIL_APP_PASSWORD) are not configured in server environment.',
+      error: 'Gmail IMAP credentials not configured.',
     };
   }
 
@@ -682,8 +623,16 @@ export async function runPaymentVerificationScan(
             if (!message.source) continue;
 
             const parsed: any = await (simpleParser as any)(message.source);
+            const senderText =
+              parsed?.from?.text || message.envelope?.from?.[0]?.address || '';
+
+            // NEW: Direct domain gate — passes FamPay AND Slice
+            if (!isAllowedSenderDomain(senderText)) {
+              continue;
+            }
+
             const payload: EmailPayload = {
-              from: parsed?.from?.text || message.envelope?.from?.[0]?.address || '',
+              from: senderText,
               subject: parsed?.subject || message.envelope?.subject || '',
               date: parsed?.date || message.envelope?.date,
               text: parsed?.text || '',
@@ -691,10 +640,13 @@ export async function runPaymentVerificationScan(
               messageId: parsed?.messageId,
             };
 
-            const diagResult = parsePaymentAlert(payload, config.verifiedSender);
+            const diagResult = parsePaymentAlert(payload, senderText);
 
-            // Only attempt verification on candidate emails from verified sender
-            if (diagResult.isVerifiedSender && diagResult.detectedStatus === 'SUCCESS') {
+            // NEW: pass if parser thinks verified OR domain is allowed
+            if (
+              (diagResult.isVerifiedSender || isAllowedSenderDomain(senderText)) &&
+              diagResult.detectedStatus === 'SUCCESS'
+            ) {
               const matchResult = await matchAlertAgainstPendingOrders(diagResult, {
                 emailDate: payload.date,
                 emailUid: message.uid,
@@ -712,7 +664,7 @@ export async function runPaymentVerificationScan(
               }
             }
           } catch (err) {
-            console.error('Error processing individual message during verification scan:', err);
+            console.error('Error processing message:', err);
           }
         }
       }
@@ -735,10 +687,7 @@ export async function runPaymentVerificationScan(
     try {
       await client.logout().catch(() => {});
       client.close();
-    } catch {
-      // Ignore
-    }
-
+    } catch {}
     return {
       success: false,
       scannedEmailsCount: scannedCount,
@@ -747,7 +696,7 @@ export async function runPaymentVerificationScan(
       duplicatesRejectedCount: duplicatesCount,
       details: results,
       durationMs: Date.now() - startTime,
-      error: typeof err === 'string' ? err : err.message || 'IMAP Verification Scan Failed',
+      error: typeof err === 'string' ? err : err.message || 'IMAP Scan Failed',
     };
   } finally {
     isVerificationScanRunning = false;
