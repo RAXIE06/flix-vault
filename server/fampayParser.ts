@@ -1,11 +1,11 @@
 /**
  * FamPay Email Alert Diagnostic Parser
- * 
+ * Now supports Slice Bank payment alerts as well.
+ *
  * Implements strict, defensive parsing of incoming payment alerts.
- * Adheres to Phase 3 / 3A safety requirements:
  * - Does not assume unvalidated formats.
  * - Extracts sender, status, amount, currency, UTR, and timestamp.
- * - Enforces verified sender allowlist.
+ * - Enforces verified sender allowlist (FamApp / FamPay / Slice).
  * - Flags unrecognized emails or missing fields with explicit limitations.
  * - Never treats arbitrary strings as payment proof.
  */
@@ -45,6 +45,7 @@ export interface FamPayDiagnosticResult {
   parseConfidence: ParseConfidence;
   missingFields: string[];
   limitations: string[];
+  detectedProvider?: 'famapp' | 'fampay' | 'slice' | 'unknown'; // NEW
 }
 
 /**
@@ -60,7 +61,19 @@ export function extractEmailAddress(rawSender: string = ''): string {
 }
 
 /**
- * Checks if sender matches configured verified FamPay senders
+ * NEW: Detect provider from sender address
+ */
+export function detectProvider(senderAddress: string): 'famapp' | 'fampay' | 'slice' | 'unknown' {
+  const s = (senderAddress || '').toLowerCase();
+  if (s.includes('slice.bank.in') || s.includes('slice')) return 'slice';
+  if (s.includes('famapp.in')) return 'famapp';
+  if (s.includes('fampay.in') || s.includes('fampay.club')) return 'fampay';
+  return 'unknown';
+}
+
+/**
+ * Checks if sender matches configured verified senders
+ * Now includes Slice Bank.
  */
 export function isSenderVerified(
   senderAddress: string,
@@ -73,7 +86,7 @@ export function isSenderVerified(
   const normalized = senderAddress.toLowerCase().trim();
   const canonicalSender = normalized.replace('no-replay@', 'no-reply@');
 
-  // If user explicitly configured a verified sender in env
+  // If user explicitly configured verified senders in env (comma-separated)
   if (configuredSender && configuredSender.trim()) {
     const configuredList = configuredSender
       .split(',')
@@ -90,7 +103,8 @@ export function isSenderVerified(
       } else if (
         canonicalSender === canonicalAllowed ||
         normalized === allowed ||
-        (allowed === 'no-replay@famapp.in' && (normalized === 'no-reply@famapp.in' || normalized === 'no-replay@famapp.in'))
+        (allowed === 'no-replay@famapp.in' &&
+          (normalized === 'no-reply@famapp.in' || normalized === 'no-replay@famapp.in'))
       ) {
         return true;
       }
@@ -108,6 +122,17 @@ export function isSenderVerified(
     normalized === 'alerts@fampay.in' ||
     normalized === 'payments@fampay.in' ||
     normalized === 'support@fampay.in'
+  ) {
+    return true;
+  }
+
+  // NEW: Slice Bank verified senders
+  if (
+    canonicalSender.endsWith('@slice.bank.in') ||
+    canonicalSender === 'noreply@slice.bank.in' ||
+    canonicalSender === 'no-reply@slice.bank.in' ||
+    canonicalSender === 'alerts@slice.bank.in' ||
+    canonicalSender === 'notifications@slice.bank.in'
   ) {
     return true;
   }
@@ -134,9 +159,18 @@ export function stripHtml(html: string = ''): string {
 
 /**
  * Detects payment status from subject and content
+ * Slice-specific: "Received ₹X in your slice account" -> SUCCESS
+ *                 "₹X debited from your slice account" -> FAILED (money out)
  */
 export function detectPaymentStatus(text: string, subject: string): PaymentDetectedStatus {
   const combined = `${subject} ${text}`.toLowerCase();
+
+  // NEW: Slice-specific debit detection (money OUT, not a payment TO us)
+  // Slice debit emails use "debited from your slice account"
+  if (/debited\s+from\s+your\s+slice\s+account/i.test(combined) ||
+      /₹\s*[\d.]+\s*debited/i.test(combined)) {
+    return 'FAILED';
+  }
 
   // Explicit failure signals
   if (
@@ -170,7 +204,13 @@ export function detectPaymentStatus(text: string, subject: string): PaymentDetec
     return 'PENDING';
   }
 
-  // Explicit success signals
+  // NEW: Slice-specific credit detection
+  // "Received ₹9.05 in your slice account" -> SUCCESS
+  if (/received\s+₹\s*[\d.]+\s+in\s+your\s+slice\s+account/i.test(combined)) {
+    return 'SUCCESS';
+  }
+
+  // Explicit success signals (FamPay + generic)
   if (
     combined.includes('received') ||
     combined.includes('credited') ||
@@ -193,8 +233,6 @@ export function detectPaymentStatus(text: string, subject: string): PaymentDetec
  * Extracts amount in INR and converts to integer paise
  */
 export function extractAmount(text: string): ParsedAmount | null {
-  // Regex patterns matching Indian rupee formats
-  // e.g. ₹149.38, Rs. 149.38, Rs 149.38, INR 149.38, received ₹149.38
   const patterns: RegExp[] = [
     /(?:₹|Rs\.?|INR)\s*([\d,]+(?:\.\d{1,2})?)/i,
     /(?:amount|received|credited|paid)[:\s]*(?:₹|Rs\.?|INR)?\s*([\d,]+(?:\.\d{1,2})?)/i,
@@ -207,7 +245,6 @@ export function extractAmount(text: string): ParsedAmount | null {
       const rawNumberStr = match[1].replace(/,/g, '');
       const num = parseFloat(rawNumberStr);
       if (!isNaN(num) && num > 0 && num < 10000000) {
-        // Validate at most 2 decimal places
         const decimalPart = rawNumberStr.includes('.') ? rawNumberStr.split('.')[1] : '';
         if (decimalPart.length <= 2) {
           const paise = Math.round(num * 100);
@@ -226,14 +263,16 @@ export function extractAmount(text: string): ParsedAmount | null {
 }
 
 /**
- * Extracts standard 12-digit UPI UTR or payment reference
+ * Extracts standard 12-digit UPI UTR or payment reference.
+ * Extended to also look for Slice-specific transaction references.
  */
 export function extractUtr(text: string): string | null {
-  // Standard NPCI UPI UTR is 12 digits e.g. 428612345678
-  // Look for labeled UTR first
   const labeledPatterns: RegExp[] = [
+    // FamPay / standard UPI UTR
     /(?:UTR|UPI\s*(?:Ref|Reference)(?:\s*(?:No|Number))?|Ref\s*(?:No|Number)?|RRN|Txn\s*ID|Transaction\s*ID)[:\s#-]*([0-9]{12})/i,
     /(?:UTR|UPI\s*(?:Ref|Reference))[:\s#-]*([A-Za-z0-9]{12,24})/i,
+    // NEW: Slice-specific transaction reference patterns
+    /(?:Transaction\s*(?:ID|No|Number)|Txn\s*(?:ID|No)|Reference\s*(?:ID|No)|Ref\s*No|RRN|UTR)[:\s#-]*([A-Za-z0-9]{8,24})/i,
   ];
 
   for (const pat of labeledPatterns) {
@@ -246,11 +285,14 @@ export function extractUtr(text: string): string | null {
       if (/^[A-Za-z0-9]{12,24}$/.test(candidate)) {
         return candidate;
       }
+      // NEW: Slice refs can be 8+ alphanumeric
+      if (/^[A-Za-z0-9]{8,24}$/.test(candidate)) {
+        return candidate;
+      }
     }
   }
 
-  // Secondary check: look for standalone 12-digit numeric reference
-  // only if near transaction context
+  // Secondary check: standalone 12-digit numeric reference near transaction context
   const lines = text.split('\n');
   for (const line of lines) {
     if (/(?:ref|utr|upi|txn|bank|transfer|id)/i.test(line)) {
@@ -266,16 +308,16 @@ export function extractUtr(text: string): string | null {
 
 /**
  * Extracts FamApp/FamPay transaction ID if present
- * e.g. "with transaction id FMPIB6783525504" -> "FMPIB6783525504"
  */
 export function extractFamPayTxnId(text: string): string | null {
-  const match = text.match(/(?:with\s+transaction\s+id|transaction\s*id|FamPay\s*(?:Txn|ID|Ref)|Order\s*ID)[:\s#-]*([A-Za-z0-9_-]{6,30})/i);
+  const match = text.match(
+    /(?:with\s+transaction\s+id|transaction\s*id|FamPay\s*(?:Txn|ID|Ref)|Order\s*ID)[:\s#-]*([A-Za-z0-9_-]{6,30})/i
+  );
   return match && match[1] ? match[1].trim() : null;
 }
 
 /**
  * Extracts payer name if present
- * e.g. "from NITISH KUMAR at 04:55 PM IST" -> "NITISH KUMAR"
  */
 export function extractPayerName(text: string): string | null {
   const match = text.match(/from\s+([A-Za-z\s]{2,40}?)\s+at\s+\d{1,2}:\d{2}/i);
@@ -283,7 +325,7 @@ export function extractPayerName(text: string): string | null {
 }
 
 /**
- * Extracts payer VPA/UPI ID if present in the text
+ * Extracts payer VPA/UPI ID if present
  */
 export function extractPayerVpa(text: string): string | null {
   const match = text.match(/(?:from|by|payer|vpa)[:\s]*([a-zA-Z0-9._-]+@[a-zA-Z0-9]+)/i);
@@ -291,17 +333,17 @@ export function extractPayerVpa(text: string): string | null {
 }
 
 /**
- * Extracts order reference or FlixVault order ID (FLX-...) if present in alert text
+ * Extracts order reference or FlixVault order ID (FLX-...) if present
  */
 export function extractOrderReference(text: string): string | null {
   if (!text) return null;
-  // Match FlixVault format: FLX-[A-Za-z0-9]+-[0-9]+
   const flxMatch = text.match(/\b(FLX-[A-Za-z0-9]+-\d+)\b/i);
   if (flxMatch && flxMatch[1]) {
     return flxMatch[1].toUpperCase();
   }
-  // Generic order reference labels
-  const refMatch = text.match(/(?:Order\s*ID|Order\s*Ref|Ref\s*ID|Payment\s*Ref|Order\s*Number)[:\s#-]*([A-Za-z0-9_-]{6,30})/i);
+  const refMatch = text.match(
+    /(?:Order\s*ID|Order\s*Ref|Ref\s*ID|Payment\s*Ref|Order\s*Number)[:\s#-]*([A-Za-z0-9_-]{6,30})/i
+  );
   if (refMatch && refMatch[1]) {
     return refMatch[1].trim();
   }
@@ -309,7 +351,7 @@ export function extractOrderReference(text: string): string | null {
 }
 
 /**
- * Main diagnostic parser for FamPay / FamApp payment alert emails
+ * Main diagnostic parser for FamPay / FamApp / Slice payment alert emails
  */
 export function parsePaymentAlert(
   email: EmailPayload,
@@ -321,16 +363,22 @@ export function parsePaymentAlert(
   const combinedText = `${subject}\n${textBody}`;
 
   const isVerified = isSenderVerified(senderAddress, configuredSender);
+  const provider = detectProvider(senderAddress);
+
+  // NEW: Include slice in candidate detection
   const isCandidate =
     isVerified ||
     senderAddress.includes('famapp') ||
     senderAddress.includes('fampay') ||
+    senderAddress.includes('slice.bank') ||
     subject.toLowerCase().includes('famapp') ||
     subject.toLowerCase().includes('fampay') ||
     subject.toLowerCase().includes('famx') ||
+    subject.toLowerCase().includes('slice account') ||
     textBody.toLowerCase().includes('famapp') ||
     textBody.toLowerCase().includes('fampay') ||
-    textBody.toLowerCase().includes('famx');
+    textBody.toLowerCase().includes('famx') ||
+    textBody.toLowerCase().includes('slice account');
 
   const detectedStatus = detectPaymentStatus(combinedText, subject);
   const detectedAmount = extractAmount(combinedText);
@@ -348,19 +396,20 @@ export function parsePaymentAlert(
     }
   }
 
-  // Calculate missing fields & limitations
   const missingFields: string[] = [];
   const limitations: string[] = [];
 
   if (!isVerified) {
     limitations.push(
-      `Sender "${senderAddress || 'unknown'}" is not in the verified FamPay sender allowlist. Unverified emails must be ignored.`
+      `Sender "${senderAddress || 'unknown'}" is not in the verified sender allowlist (FamApp/FamPay/Slice). Unverified emails must be ignored.`
     );
   }
 
   if (detectedStatus !== 'SUCCESS') {
     if (detectedStatus === 'FAILED' || detectedStatus === 'REFUND') {
-      limitations.push(`Payment status detected as ${detectedStatus}. Non-successful transactions must not be processed.`);
+      limitations.push(
+        `Payment status detected as ${detectedStatus}. Non-successful transactions must not be processed.`
+      );
     } else {
       missingFields.push('success_status');
       limitations.push('Payment success status could not be unambiguously verified from email content.');
@@ -374,19 +423,32 @@ export function parsePaymentAlert(
 
   if (!detectedUtr) {
     missingFields.push('utr');
-    limitations.push('12-digit UTR or transaction reference was not found in the email content.');
+    limitations.push(
+      '12-digit UTR or transaction reference was not found in the email content.'
+    );
+    // NEW: Slice fallback note — paymentVerifier may verify by amount+time if only 1 pending order
+    if (provider === 'slice') {
+      limitations.push(
+        'Slice emails often lack UTR. Verification may fall back to amount + time-window matching if exactly one matching pending order exists.'
+      );
+    }
   }
 
-  // Confidence determination
   let parseConfidence: ParseConfidence = 'UNRECOGNIZED';
   if (!isVerified) {
     parseConfidence = 'UNRECOGNIZED';
   } else if (detectedStatus === 'SUCCESS' && detectedAmount && detectedUtr) {
     parseConfidence = 'HIGH';
+  } else if (detectedStatus === 'SUCCESS' && detectedAmount && provider === 'slice') {
+    // NEW: Slice can be HIGH/MEDIUM even without UTR (amount + time fallback)
+    parseConfidence = 'MEDIUM';
+    limitations.push(
+      'Slice email recognized, but UTR missing. Verification will use amount + time-window matching with single-pending-order safeguard.'
+    );
   } else if (detectedAmount || detectedUtr) {
     parseConfidence = 'MEDIUM';
     limitations.push(
-      'Email format partially recognized, but required fields are missing. Live automated payment verification requires a genuine, redacted FamPay payment alert sample.'
+      'Email format partially recognized, but required fields are missing.'
     );
   } else {
     parseConfidence = 'UNRECOGNIZED';
@@ -411,5 +473,6 @@ export function parsePaymentAlert(
     parseConfidence,
     missingFields,
     limitations,
+    detectedProvider: provider,
   };
 }
